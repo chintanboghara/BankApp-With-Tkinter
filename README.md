@@ -25,3 +25,48 @@ This is a simple bank application implemented using Python's Tkinter library for
    ```sh
    python BankAppWithTkinter.py
    ```
+
+## Usage
+
+### Registration:
+1. Click on the "Sign Up" button on the login screen.
+2. Enter the required details: username, full name, age, gender, initial balance, and password.
+3. Click "Register" to create an account.
+
+### Login:
+1. Enter your username and password on the login screen.
+2. Click "Login" to access the home dashboard.
+
+### Home Dashboard:
+- **Personal Info:** View your personal details.
+- **Deposit:** Deposit money into your account.
+- **Withdraw:** Withdraw money from your account.
+- **Logout:** Log out and return to the login screen.
+
+### Password Visibility:
+- Click the eye icon next to the password field to toggle password visibility.
+
+## Code Structure
+
+- **Main Window (`master`):** The initial login window.
+- **Registration Screen (`rScreen`):** A separate window for user registration.
+- **Home Page (`hScreen`):** The dashboard for logged-in users.
+- **Deposit Page (`dScreen`):** A window for depositing money.
+- **Withdraw Page (`wScreen`):** A window for withdrawing money.
+- **Personal Info Page (`pScreen`):** A window to view personal information.
+
+## File Format
+
+The user data is stored in a binary file named `appData.bin`. Each user's data is stored as a dictionary in a list, including:
+
+- **Username (`uname`)**
+- **Password (`pass`)**
+- **Gender (`gender`)**
+- **Age (`age`)**
+- **Balance (`balance`)**
+- **Full Name (`name`)**
+
+## Error Handling
+
+- Invalid input for age, balance, or name will prompt error messages.
+- Password visibility toggle allows for a better user experience.
