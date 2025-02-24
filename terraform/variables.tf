@@ -16,7 +16,7 @@ variable "instance_type" {
 }
 
 variable "key_name" {
-  description = "Name of the AWS key pair for the Windows instance"
+  description = "Name of the AWS key pair for the instance"
   type        = string
 }
 
