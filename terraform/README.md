@@ -1,17 +1,17 @@
 # Terraform Deployment for Bank Application on AWS EC2 Windows
 
-This Terraform project provisions an AWS EC2 Windows instance to host the Bank Application. It installs the required packages (Python3, Git, Chocolatey) and clones the Bank Application repository.
+This Terraform configuration provisions an AWS EC2 Windows instance to run the production-ready Bank Application. It installs Python3, Git, and Chocolatey, then clones the application repository and starts the application.
 
 ## Files
 
 - **main.tf:**  
-  Contains the AWS provider configuration and defines the EC2 instance resource with a remote-exec provisioner that runs PowerShell commands to install prerequisites, clone the repository, and start the application.
-
+  Defines the EC2 instance resource and provisions it using PowerShell commands.
+  
 - **variables.tf:**  
-  Defines variables for AWS region, AMI ID, instance type, key name, Windows username, and password.
-
+  Contains variable definitions for AWS region, AMI ID, instance type, key pair, and Windows credentials.
+  
 - **outputs.tf:**  
-  Outputs the public IP address of the provisioned EC2 instance.
+  Outputs the public IP address of the provisioned instance.
 
 ## Deployment Steps
 
@@ -29,17 +29,21 @@ This Terraform project provisions an AWS EC2 Windows instance to host the Bank A
    ```sh
    terraform plan -var "ami_id=ami-xxxxxxxx" -var "key_name=your-key-name" -var "instance_password=your-instance-password"
    ```
-   Replace `ami-xxxxxxxx` with the appropriate Windows AMI ID (for example, Windows Server 2019 Base), `your-key-name` with your AWS key pair name, and `your-instance-password` with the Administrator password for the instance.
+   Replace:
+   - `ami-xxxxxxxx` with the Windows AMI ID (e.g., Windows Server 2019 Base),
+   - `your-key-name` with your AWS key pair name,
+   - `your-instance-password` with the Administrator password.
 
-4. **Apply the Terraform configuration:**
+4. **Apply the configuration:**
    ```sh
    terraform apply -var "ami_id=ami-xxxxxxxx" -var "key_name=your-key-name" -var "instance_password=your-instance-password"
    ```
-   Confirm the prompt to deploy the resources.
+   Confirm when prompted.
 
-5. **Access the Instance:**
-   Once deployed, the public IP of the instance will be output. Use Remote Desktop (RDP) to connect to the instance:
-   ```sh
-   mstsc /v:<instance_public_ip>
-   ```
-   Log in using the username specified in `instance_username` (default is `Administrator`) and the provided password.
+5. **Connect via RDP:**
+   - Retrieve the instance public IP from Terraform outputs or the AWS Console.
+   - Open the Remote Desktop Connection client (`mstsc` on Windows) and connect using:
+     ```sh
+     mstsc /v:<instance_public_ip>
+     ```
+   - Log in with the username specified (default is `Administrator`) and the provided password.
