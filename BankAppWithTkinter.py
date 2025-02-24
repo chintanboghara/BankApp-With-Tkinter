@@ -1,429 +1,387 @@
-# main(master)-->register,login
-#  register(screen)--->name,age,gender,balance,password(Entry)
-
-# log(screen)--->name,password
-# register(button)--->authenticate-name in alphabet,bal in digit
-#                  --->create file of name with all information
-# dashboard: Buttons(personalinfo , withdraw, deposit)
-
+import os
+import pickle
+import re
 from tkinter import *
-from time import sleep
-from tkinter.ttk import Entry as entry, Button as button
-import tkinter.messagebox as mb
-from pickle import load, dump
-from re import match,compile
+from tkinter import ttk, messagebox
 
-def isNumber(s: str) -> bool:
-            if s.isnumeric():
-                return True 
-            return True if match(compile(r'^[-+]?(?:\d+(\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$'), s) else False
+DATA_FILE = 'appData.bin'
 
 
-
-master = Tk()
-userPersonalData = Variable(master,value=None)
-master.minsize(500,450)
-master.maxsize(500,450)
-master.title('Login Page')
-master.configure(bg='white')
-
-userName = StringVar()
-nameData = StringVar()
-ageData = StringVar()
-genderData = IntVar()
-balanceData = StringVar()
-passw = StringVar()
-
-master.geometry('500x450')
-
-msg = Label(master, text='', font=('arial', 17), bg='white')
-msg.place(anchor=CENTER, relx=.5, rely=.75)
-
-
-
-def homePage():
-    print(userPersonalData.get(),type((userPersonalData.get())))
-    hScreen = Toplevel(master)
-    master.withdraw()
-    hScreen.minsize(500,350)
-    hScreen.maxsize(500,350)
-    hScreen.title('Home Page')
-    hScreen.configure(bg='white')
-    hBalLb = Label(hScreen, text='Balance: '+balanceData.get(), font=('arial', 15),
-          bg='white')
-    hBalLb.place(anchor=CENTER, relx=.83, rely=.2)
-    def logOut():
-        hScreen.destroy()
-        userPersonalData.set(None)
-        master.deiconify()
-
-    def personalInfo():
-      pScreen = Toplevel(hScreen)
-      hScreen.withdraw()
-      pScreen.minsize(500,350)
-      pScreen.maxsize(500,350)
-      pScreen.title('Home Page')
-      pScreen.configure(bg='white')
-      
-      def logOut():
-            pScreen.destroy()
-            master.deiconify()
-            nameData.set('')
-            ageData.set('')
-            balanceData.set('')
-            genderData.set('')
-      def backToHome():
-            pScreen.destroy()
-            hScreen.deiconify()
-      
-      Label(pScreen, text='Personal Data of '+userName.get(), font=('arial', 30),
-            bg='white').place(anchor=CENTER, relx=.5, rely=.07)
-      
-      Label(pScreen, text='Name: '+nameData.get(), font=('arial', 18),
-            bg='white').place(anchor=CENTER, relx=.5, rely=.2)
-      
-      Label(pScreen, text='Age: '+ageData.get(), font=('arial', 18),
-            bg='white').place(anchor=CENTER, relx=.5, rely=.4)
-      
-      Label(pScreen, text='Gender: '+('Male' if genderData.get() else 'Female'), font=('arial', 18),
-            bg='white').place(anchor=CENTER, relx=.5, rely=.6)
-      
-      Label(pScreen, text='Balance: '+balanceData.get(), font=('arial', 18),
-            bg='white').place(anchor=CENTER, relx=.5, rely=.8)
-      
-      Button(pScreen, text='Back', font=('arial', 15), bg='black', fg='white',
-            cursor="circle", command=backToHome).place(anchor=CENTER, relx=.65, rely=.9)
-      
-      Button(pScreen, text='Logout', font=('arial', 15), bg='black', fg='white',
-            cursor="circle", command=logOut).place(anchor=CENTER, relx=.35, rely=.9)
-      
-      pScreen.mainloop()
-    
-    def DepositPage():
-      dScreen = Toplevel(hScreen)
-      hScreen.withdraw()
-      dScreen.minsize(500,350)
-      dScreen.maxsize(500,350)
-      dScreen.title('Deposit Page')
-      dScreen.configure(bg='white')
-      
-      amount = StringVar()
-      Label(dScreen, text='User: '+userName.get(), font=('arial', 12),
-            bg='white').place(anchor=CENTER, relx=.1, rely=.16)
-      dBalLb = Label(dScreen, text='Balance: '+balanceData.get(), font=('arial', 12),
-            bg='white')
-      dBalLb.place(anchor=CENTER, relx=.8, rely=.16)
-      
-      def depositProcess():
-            if not isNumber(amount.get()):
-                  mb.askokcancel('Invalid Amount','Please provide only numeic data in Amount Field ')
-            elif int(amount.get())<=0:
-                  mb.askokcancel('Invalid Amount','Please provide amount larger than Zero(0)')
-            else:
-                  dataFile = open('appData.bin','rb+')
-                  allUserData: list = load(dataFile)
-                  balanceData.set(str(int(amount.get()) + int(balanceData.get())))
-                  dataFile.seek(0)
-                  for i in range(len(allUserData)):
-                        if allUserData[i]['uname'] == userName.get():
-                              allUserData[i]['balance'] = balanceData.get()
-                              break
-                  dump(file=dataFile,obj=allUserData)
-                  mb.askyesno('Success','Deposit Successfull')
-                  dBalLb.config(text='Balance: '+balanceData.get())
-                  hBalLb.config(text='Balance: '+balanceData.get())
-                  return
-      def logOut():
-            nameData.set('')
-            ageData.set('')
-            balanceData.set('')
-            genderData.set('')
-            dScreen.destroy()
-            hScreen.destroy()
-            master.deiconify()
-
-      def backToHome():
-            dScreen.destroy()
-            hScreen.deiconify()
-
-      
-      Label(dScreen, text='DEPOSIT', font=('arial', 20),
-            bg='white').place(anchor=CENTER, relx=.5, rely=.07)
-      
-     
-      Label(dScreen, text='Amount: ', font=('arial', 15),
-            bg='white').place(anchor=CENTER, relx=.2, rely=.3)
-      entry(dScreen, font=('arial', 15), textvariable=amount).place(anchor=CENTER, relx=.65, rely=.3)
-      
-      
-      Label(dScreen, text='', font=('arial', 18),
-            bg='white').place(anchor=CENTER, relx=.5, rely=.4)
-      
-      Button(dScreen, text='DEPOSIT', font=('arial', 15), bg='black', fg='white',
-            cursor="circle", command=depositProcess).place(anchor=CENTER, relx=.5, rely=.5)
-      
-      Button(dScreen, text='Back', font=('arial', 15), bg='black', fg='white',
-            cursor="circle", command=backToHome).place(anchor=CENTER, relx=.65, rely=.9)
-      
-      Button(dScreen, text='Logout', font=('arial', 15), bg='black', fg='white',
-            cursor="circle", command=logOut).place(anchor=CENTER, relx=.35, rely=.9)
-      
-      dScreen.mainloop()
-
-    def WithdrawPage():
-      wScreen = Toplevel(hScreen)
-      hScreen.withdraw()
-      wScreen.minsize(500,350)
-      wScreen.maxsize(500,350)
-      wScreen.title('Withdraw Page')
-      wScreen.configure(bg='white')
-      
-      amount = StringVar()
-      Label(wScreen, text='User: '+userName.get(), font=('arial', 12),
-            bg='white').place(anchor=CENTER, relx=.1, rely=.16)
-      wBalLb = Label(wScreen, text='Balance: '+balanceData.get(), font=('arial', 12),
-            bg='white')
-      wBalLb.place(anchor=CENTER, relx=.8, rely=.16)
-      
-      def withdrawProcess():
-            if not isNumber(amount.get()):
-                  mb.askokcancel('Invalid Amount','Please provide only numeic data in Amount Field ')
-            elif int(amount.get())<=0:
-                  mb.askokcancel('Invalid Amount','Please provide amount larger than Zero(0)')
-            elif (int(balanceData.get()) - int(amount.get()))<0:
-                  mb.askokcancel('Invalid Amount','Balance cannot be negative.\nPlease Provide feasible amount🙏.')
-            else:
-                  dataFile = open('appData.bin','rb+')
-                  allUserData: list = load(dataFile)
-                  balanceData.set(str(int(balanceData.get()) - int(amount.get())) )
-                  dataFile.seek(0)
-                  for i in range(len(allUserData)):
-                        if allUserData[i]['uname'] == userName.get():
-                              allUserData[i]['balance'] = balanceData.get()
-                              break
-                  dump(file=dataFile,obj=allUserData)
-                  mb.askyesno('Success','Withdraw Successfull of 💲'+amount.get())
-                  wBalLb.config(text='Balance: '+balanceData.get())
-                  hBalLb.config(text='Balance: '+balanceData.get())
-                  return
-      def logOut():
-            nameData.set('')
-            ageData.set('')
-            balanceData.set('')
-            genderData.set('')
-            wScreen.destroy()
-            hScreen.destroy()
-            master.deiconify()
-
-      def backToHome():
-            wScreen.destroy()
-            hScreen.deiconify()
-
-      
-      Label(wScreen, text='WITHDRAW', font=('arial', 20),
-            bg='white').place(anchor=CENTER, relx=.5, rely=.07)
-      
-     
-      Label(wScreen, text='Amount: ', font=('arial', 15),
-            bg='white').place(anchor=CENTER, relx=.2, rely=.3)
-      entry(wScreen, font=('arial', 15), textvariable=amount).place(anchor=CENTER, relx=.65, rely=.3)
-      
-      
-      Label(wScreen, text='', font=('arial', 18),
-            bg='white').place(anchor=CENTER, relx=.5, rely=.4)
-      
-      Button(wScreen, text='Withdraw', font=('arial', 15), bg='black', fg='white',
-            cursor="circle", command=withdrawProcess).place(anchor=CENTER, relx=.5, rely=.5)
-      
-      Button(wScreen, text='Back', font=('arial', 15), bg='black', fg='white',
-            cursor="circle", command=backToHome).place(anchor=CENTER, relx=.65, rely=.9)
-      
-      Button(wScreen, text='Logout', font=('arial', 15), bg='black', fg='white',
-            cursor="circle", command=logOut).place(anchor=CENTER, relx=.35, rely=.9)
-      
-      wScreen.mainloop()
-    
-    Label(hScreen, text='Welcome '+userName.get(), font=('arial', 30),
-          bg='white').place(anchor=CENTER, relx=.5, rely=.07)
-    
-    Label(hScreen, text='Username: '+userName.get(), font=('arial', 15),
-          bg='white').place(anchor=CENTER, relx=.2, rely=.2)
-    
-    
-    
-    Button(hScreen, text='Deposit', font=('arial', 15), bg='black', fg='white',
-           cursor="circle", command=DepositPage).place(anchor=CENTER, relx=.5, rely=.3)
-    
-    Button(hScreen, text='Withdraw', font=('arial', 15), bg='black', fg='white',
-           cursor="circle", command=WithdrawPage).place(anchor=CENTER, relx=.5, rely=.4)
-    
-    Button(hScreen, text='Personal Info', font=('arial', 15), bg='black', fg='white',
-           cursor="circle", command=personalInfo).place(anchor=CENTER, relx=.5, rely=.5)
-    
-    Button(hScreen, text='Logout', font=('arial', 15), bg='black', fg='white',
-           cursor="circle", command=logOut).place(anchor=CENTER, relx=.5, rely=.9)
-    
-    hScreen.mainloop()
-
-def doLogin():
-    print(userName.get(), passw.get())
-    appFile = None
-    listData = []
+def is_number(s):
+    """Check if the string can be interpreted as a number."""
     try:
-        appFile = open('appData.bin', 'rb')
-        listData = load(appFile)
-        for data in listData:
-            if data['uname'] == userName.get() and data['pass'] == passw.get():
-                 nameData.set(data['name'])
-                 ageData.set(data['age'])
-                 balanceData.set(data['balance'])
-                 genderData.set(data['gender'])
-                 
-                 mb.askokcancel('Success', 'Login Successful')
-                
-                 homePage()
-                 return
-        mb.askokcancel('Failed','Incorrect Username or Password')
-        return
-    except:
-        mb.askokcancel('Not Exist','No User Exist\nPlease Register First')
-        return
+        float(s)
+        return True
+    except ValueError:
+        return False
 
-def doRegister():
-    # master.state(newstate='iconic')
-    master.withdraw()
-    rScreen = Toplevel(master)
-    rScreen.minsize(500, 550)
-    rScreen.configure(bg='white')
 
-    userName = StringVar()
-    name = StringVar()
-    passw = StringVar()
-    age = StringVar()
-    gender = IntVar()
-    balance = StringVar()
+def load_user_data():
+    """Load user data from file; return an empty list if file does not exist or on error."""
+    if not os.path.exists(DATA_FILE):
+        return []
+    try:
+        with open(DATA_FILE, 'rb') as f:
+            return pickle.load(f)
+    except Exception:
+        return []
 
-    def doStackWindow():
-        rScreen.destroy()
-        master.deiconify()
 
-    def saveUserData():
-        
-        if (not [s.isalpha() for s in name.get().split()].count(True)==len(name.get().split())):
-            mb.askokcancel('Invalid Name','Please enter only alphabets in Full Name')
-            return
-            
-        if (not isNumber(balance.get())):
-                mb.askokcancel('Invalid Balance','Balance can only be of Type Numeric')
+def save_user_data(data):
+    """Save user data list to file."""
+    with open(DATA_FILE, 'wb') as f:
+        pickle.dump(data, f)
+
+
+class BankApp:
+    def __init__(self, master):
+        self.master = master
+        self.master.title("Login Page")
+        self.master.geometry("500x450")
+        self.master.configure(bg="white")
+        self.master.resizable(False, False)
+
+        # Current user info will be stored here after login
+        self.current_user = None
+
+        # Variables for login
+        self.username_var = StringVar()
+        self.password_var = StringVar()
+
+        self.create_login_screen()
+
+    def create_login_screen(self):
+        """Create and display the login screen."""
+        # Clear any existing widgets
+        for widget in self.master.winfo_children():
+            widget.destroy()
+
+        Label(self.master, text="LOGIN", font=("Arial", 40), bg="white").pack(pady=30)
+
+        frame = Frame(self.master, bg="white")
+        frame.pack()
+
+        Label(frame, text="Username", font=("Arial", 20), bg="white").grid(
+            row=0, column=0, pady=10, padx=10, sticky=E
+        )
+        entry_username = ttk.Entry(frame, font=("Arial", 18), textvariable=self.username_var, justify="center")
+        entry_username.grid(row=0, column=1, pady=10, padx=10)
+
+        Label(frame, text="Password", font=("Arial", 20), bg="white").grid(
+            row=1, column=0, pady=10, padx=10, sticky=E
+        )
+        self.entry_password = ttk.Entry(frame, font=("Arial", 18), textvariable=self.password_var,
+                                        show="⭕", justify="center")
+        self.entry_password.grid(row=1, column=1, pady=10, padx=10)
+
+        # Toggle password visibility button
+        btn_toggle = Button(frame, text="👁", font=("Arial", 14), bg="black", fg="white",
+                            command=self.toggle_password_visibility, border=0)
+        btn_toggle.grid(row=1, column=2, padx=5)
+
+        Button(self.master, text="Login", font=("Arial", 18), bg="black", fg="white",
+               command=self.do_login).pack(pady=20)
+
+        Label(self.master, text="Don't have an account?", font=("Arial", 15), bg="white").pack()
+        Button(self.master, text="Sign Up", font=("Arial", 15), fg="blue", bg="white", borderwidth=0,
+               command=self.create_register_screen).pack(pady=10)
+
+    def toggle_password_visibility(self):
+        """Toggle between hidden and visible password in login screen."""
+        if self.entry_password.cget("show") == "⭕":
+            self.entry_password.config(show="")
+        else:
+            self.entry_password.config(show="⭕")
+
+    def do_login(self):
+        """Process login using provided credentials."""
+        username = self.username_var.get().strip()
+        password = self.password_var.get().strip()
+
+        users = load_user_data()
+        for user in users:
+            if user["uname"] == username and user["pass"] == password:
+                self.current_user = user
+                messagebox.showinfo("Success", "Login Successful")
+                self.show_dashboard()
                 return
-        
-        if (not isNumber(age.get())):
-            mb.askokcancel('Invalid Age','Age can only be of Type Numeric')
-            return
-        elif int(age.get())<=0 or int(age.get()) >= 150:
-            mb.askokcancel('Invalid Age','Please Provide appropriate Age')
-            return
-        
-        appFile = None
-        listData = []
-        try:
-            appFile = open('appData.bin', 'rb+')
-            listData = load(appFile)
-            for data in listData:
-                if data['uname'] == userName.get():
-                    mb.askokcancel('Invalid Username', 'User Already Exist')
+        messagebox.showerror("Login Failed", "Incorrect Username or Password")
+
+    def create_register_screen(self):
+        """Display the registration window."""
+        self.master.withdraw()
+        register_window = Toplevel(self.master)
+        register_window.title("Sign Up")
+        register_window.geometry("500x550")
+        register_window.configure(bg="white")
+        register_window.resizable(False, False)
+
+        # Registration variables
+        reg_vars = {
+            "username": StringVar(),
+            "full_name": StringVar(),
+            "age": StringVar(),
+            "gender": IntVar(),  # 1 for Male, 0 for Female
+            "balance": StringVar(),
+            "password": StringVar()
+        }
+
+        def back_to_login():
+            register_window.destroy()
+            self.master.deiconify()
+
+        def save_user():
+            uname = reg_vars["username"].get().strip()
+            full_name = reg_vars["full_name"].get().strip()
+            age = reg_vars["age"].get().strip()
+            gender = reg_vars["gender"].get()
+            balance = reg_vars["balance"].get().strip()
+            passwd = reg_vars["password"].get().strip()
+
+            # Validate inputs
+            if not all(part.isalpha() for part in full_name.split()):
+                messagebox.showerror("Invalid Name", "Please enter only alphabets in Full Name")
+                return
+            if not is_number(balance):
+                messagebox.showerror("Invalid Balance", "Balance must be numeric")
+                return
+            if not is_number(age):
+                messagebox.showerror("Invalid Age", "Age must be numeric")
+                return
+            if int(age) <= 0 or int(age) >= 150:
+                messagebox.showerror("Invalid Age", "Please provide a valid age")
+                return
+
+            users = load_user_data()
+            for user in users:
+                if user["uname"] == uname:
+                    messagebox.showerror("Invalid Username", "User already exists")
                     return
-            appFile.seek(0)
-        except:
-            appFile = open('appData.bin', 'wb')
-        listData.append({
-            'uname': userName.get(),
-            'pass': passw.get(),
-            'gender': gender.get(),
-            'age': age.get(),
-            'balance': balance.get(),
-            'name': name.get()
-        })
-        dump(file=appFile, obj=listData)
-        
-        
-        msg.config(text='User Registered Succesfully', fg='blue')
-        doStackWindow()
-        return
-    Label(rScreen, text='Sign Up', font=('arial', 40),
-          bg='white').place(anchor=CENTER, relx=.5, rely=.07)
 
-    Label(rScreen, text='Username', font=('arial', 20),
-          bg='white').place(anchor=CENTER, relx=.2, rely=.2)
-    entry(rScreen, font=('arial', 18), justify="center",
-          textvariable=userName).place(anchor=CENTER, relx=.65, rely=.2)
+            new_user = {
+                "uname": uname,
+                "name": full_name,
+                "age": age,
+                "gender": gender,
+                "balance": balance,
+                "pass": passwd
+            }
+            users.append(new_user)
+            save_user_data(users)
+            messagebox.showinfo("Success", "User Registered Successfully")
+            back_to_login()
 
-    Label(rScreen, text='Full Name', font=('arial', 20),
-          bg='white').place(anchor=CENTER, relx=.2, rely=.3)
-    entry(rScreen, font=('arial', 18), justify="center",
-          textvariable=name).place(anchor=CENTER, relx=.65, rely=.3)
+        Label(register_window, text="Sign Up", font=("Arial", 40), bg="white").pack(pady=20)
 
-    Label(rScreen, text='Age', font=('arial', 20), bg='white').place(
-        anchor=CENTER, relx=.2, rely=.4)
-    entry(rScreen, font=('arial', 18), justify="center",
-          textvariable=age).place(anchor=CENTER, relx=.65, rely=.4)
+        form_frame = Frame(register_window, bg="white")
+        form_frame.pack(pady=10)
 
-    Label(rScreen, text='Gender', font=('arial', 20),
-          bg='white').place(anchor=CENTER, relx=.2, rely=.5)
-    Radiobutton(rScreen, text="Male", font=('arial', 20), bg='white',
-                variable=gender, value=1).place(anchor=CENTER, relx=.48, rely=.5)
-    Radiobutton(rScreen, text="Female", font=('arial', 20), bg='white',
-                variable=gender, value=0).place(anchor=CENTER, relx=.77, rely=.5)
+        Label(form_frame, text="Username", font=("Arial", 20), bg="white").grid(
+            row=0, column=0, pady=5, padx=10, sticky=E
+        )
+        ttk.Entry(form_frame, font=("Arial", 18), textvariable=reg_vars["username"], justify="center").grid(
+            row=0, column=1, pady=5, padx=10
+        )
 
-    Label(rScreen, text='Balance', font=('arial', 20),
-          bg='white').place(anchor=CENTER, relx=.2, rely=.6)
-    entry(rScreen, font=('arial', 18), justify="center",
-          textvariable=balance).place(anchor=CENTER, relx=.65, rely=.6)
+        Label(form_frame, text="Full Name", font=("Arial", 20), bg="white").grid(
+            row=1, column=0, pady=5, padx=10, sticky=E
+        )
+        ttk.Entry(form_frame, font=("Arial", 18), textvariable=reg_vars["full_name"], justify="center").grid(
+            row=1, column=1, pady=5, padx=10
+        )
 
-    Label(rScreen, text='Password', font=('arial', 20),
-          bg='white').place(anchor=CENTER, relx=.2, rely=.7)
-    entry(rScreen, font=('arial', 18), justify="center",
-          textvariable=passw).place(anchor=CENTER, relx=.65, rely=.7)
+        Label(form_frame, text="Age", font=("Arial", 20), bg="white").grid(
+            row=2, column=0, pady=5, padx=10, sticky=E
+        )
+        ttk.Entry(form_frame, font=("Arial", 18), textvariable=reg_vars["age"], justify="center").grid(
+            row=2, column=1, pady=5, padx=10
+        )
 
-    Button(rScreen, text='Register', font=('arial', 18), bg='black', fg='white',
-           cursor="circle", command=saveUserData).place(anchor=CENTER, relx=.5, rely=.8)
-    Label(rScreen, text='Already have an account then ', font=(
-        'arial', 15), bg='white').place(anchor=CENTER, relx=.4, rely=.89)
-    Button(rScreen, text='Sign In', font=('arial', 15), borderwidth=0, bg='white', fg='blue',
-           cursor="circle", command=doStackWindow).place(anchor=CENTER, relx=.73, rely=.89)
+        Label(form_frame, text="Gender", font=("Arial", 20), bg="white").grid(
+            row=3, column=0, pady=5, padx=10, sticky=E
+        )
+        gender_frame = Frame(form_frame, bg="white")
+        gender_frame.grid(row=3, column=1, pady=5, padx=10)
+        Radiobutton(gender_frame, text="Male", font=("Arial", 20), bg="white",
+                    variable=reg_vars["gender"], value=1).pack(side=LEFT, padx=5)
+        Radiobutton(gender_frame, text="Female", font=("Arial", 20), bg="white",
+                    variable=reg_vars["gender"], value=0).pack(side=LEFT, padx=5)
 
-    rScreen.mainloop()
+        Label(form_frame, text="Balance", font=("Arial", 20), bg="white").grid(
+            row=4, column=0, pady=5, padx=10, sticky=E
+        )
+        ttk.Entry(form_frame, font=("Arial", 18), textvariable=reg_vars["balance"], justify="center").grid(
+            row=4, column=1, pady=5, padx=10
+        )
+
+        Label(form_frame, text="Password", font=("Arial", 20), bg="white").grid(
+            row=5, column=0, pady=5, padx=10, sticky=E
+        )
+        ttk.Entry(form_frame, font=("Arial", 18), textvariable=reg_vars["password"], justify="center",
+                  show="*").grid(row=5, column=1, pady=5, padx=10)
+
+        Button(register_window, text="Register", font=("Arial", 18), bg="black", fg="white",
+               command=save_user).pack(pady=20)
+        Label(register_window, text="Already have an account?", font=("Arial", 15), bg="white").pack()
+        Button(register_window, text="Sign In", font=("Arial", 15), fg="blue", bg="white",
+               borderwidth=0, command=back_to_login).pack(pady=10)
+
+    def show_dashboard(self):
+        """Display the dashboard with options for deposit, withdraw, and personal info."""
+        dashboard = Toplevel(self.master)
+        dashboard.title("Dashboard")
+        dashboard.geometry("500x350")
+        dashboard.configure(bg="white")
+        dashboard.resizable(False, False)
+
+        Label(dashboard, text=f"Welcome {self.current_user['uname']}", font=("Arial", 30),
+              bg="white").pack(pady=20)
+        balance_label = Label(dashboard, text=f"Balance: {self.current_user['balance']}",
+                              font=("Arial", 15), bg="white")
+        balance_label.pack()
+
+        def logout():
+            self.current_user = None
+            dashboard.destroy()
+            self.create_login_screen()
+            self.master.deiconify()
+
+        Button(dashboard, text="Deposit", font=("Arial", 15), bg="black", fg="white",
+               command=lambda: self.show_deposit(dashboard, balance_label)).pack(pady=5)
+        Button(dashboard, text="Withdraw", font=("Arial", 15), bg="black", fg="white",
+               command=lambda: self.show_withdraw(dashboard, balance_label)).pack(pady=5)
+        Button(dashboard, text="Personal Info", font=("Arial", 15), bg="black", fg="white",
+               command=lambda: self.show_personal_info(dashboard)).pack(pady=5)
+        Button(dashboard, text="Logout", font=("Arial", 15), bg="black", fg="white",
+               command=logout).pack(pady=20)
+
+    def update_user_balance(self, new_balance):
+        """Update the current user's balance and persist the change."""
+        users = load_user_data()
+        for user in users:
+            if user["uname"] == self.current_user["uname"]:
+                user["balance"] = new_balance
+                self.current_user["balance"] = new_balance
+                break
+        save_user_data(users)
+
+    def show_deposit(self, parent, balance_label):
+        """Display the deposit window."""
+        deposit_win = Toplevel(parent)
+        deposit_win.title("Deposit")
+        deposit_win.geometry("500x350")
+        deposit_win.configure(bg="white")
+        deposit_win.resizable(False, False)
+
+        amount_var = StringVar()
+
+        Label(deposit_win, text=f"User: {self.current_user['uname']}", font=("Arial", 12),
+              bg="white").pack(anchor="w", padx=20, pady=10)
+        bal_lbl = Label(deposit_win, text=f"Balance: {self.current_user['balance']}", font=("Arial", 12),
+                        bg="white")
+        bal_lbl.pack(anchor="e", padx=20, pady=10)
+
+        Label(deposit_win, text="Amount:", font=("Arial", 15), bg="white").pack(pady=10)
+        ttk.Entry(deposit_win, font=("Arial", 15), textvariable=amount_var, justify="center").pack(pady=10)
+
+        def deposit_process():
+            amount = amount_var.get().strip()
+            if not is_number(amount):
+                messagebox.showerror("Invalid Amount", "Please provide only numeric data")
+                return
+            if int(amount) <= 0:
+                messagebox.showerror("Invalid Amount", "Amount must be greater than zero")
+                return
+            new_balance = str(int(self.current_user['balance']) + int(amount))
+            self.update_user_balance(new_balance)
+            messagebox.showinfo("Success", "Deposit Successful")
+            bal_lbl.config(text=f"Balance: {new_balance}")
+            balance_label.config(text=f"Balance: {new_balance}")
+
+        Button(deposit_win, text="Deposit", font=("Arial", 15), bg="black", fg="white",
+               command=deposit_process).pack(pady=10)
+        Button(deposit_win, text="Back", font=("Arial", 15), bg="black", fg="white",
+               command=deposit_win.destroy).pack(side="right", padx=20, pady=20)
+        Button(deposit_win, text="Logout", font=("Arial", 15), bg="black", fg="white",
+               command=lambda: [deposit_win.destroy(), parent.destroy(), self.create_login_screen()]).pack(
+            side="left", padx=20, pady=20)
+
+    def show_withdraw(self, parent, balance_label):
+        """Display the withdraw window."""
+        withdraw_win = Toplevel(parent)
+        withdraw_win.title("Withdraw")
+        withdraw_win.geometry("500x350")
+        withdraw_win.configure(bg="white")
+        withdraw_win.resizable(False, False)
+
+        amount_var = StringVar()
+
+        Label(withdraw_win, text=f"User: {self.current_user['uname']}", font=("Arial", 12),
+              bg="white").pack(anchor="w", padx=20, pady=10)
+        bal_lbl = Label(withdraw_win, text=f"Balance: {self.current_user['balance']}", font=("Arial", 12),
+                        bg="white")
+        bal_lbl.pack(anchor="e", padx=20, pady=10)
+
+        Label(withdraw_win, text="Amount:", font=("Arial", 15), bg="white").pack(pady=10)
+        ttk.Entry(withdraw_win, font=("Arial", 15), textvariable=amount_var, justify="center").pack(pady=10)
+
+        def withdraw_process():
+            amount = amount_var.get().strip()
+            if not is_number(amount):
+                messagebox.showerror("Invalid Amount", "Please provide only numeric data")
+                return
+            if int(amount) <= 0:
+                messagebox.showerror("Invalid Amount", "Amount must be greater than zero")
+                return
+            if int(self.current_user['balance']) - int(amount) < 0:
+                messagebox.showerror("Invalid Amount", "Insufficient funds")
+                return
+            new_balance = str(int(self.current_user['balance']) - int(amount))
+            self.update_user_balance(new_balance)
+            messagebox.showinfo("Success", f"Withdraw successful of ${amount}")
+            bal_lbl.config(text=f"Balance: {new_balance}")
+            balance_label.config(text=f"Balance: {new_balance}")
+
+        Button(withdraw_win, text="Withdraw", font=("Arial", 15), bg="black", fg="white",
+               command=withdraw_process).pack(pady=10)
+        Button(withdraw_win, text="Back", font=("Arial", 15), bg="black", fg="white",
+               command=withdraw_win.destroy).pack(side="right", padx=20, pady=20)
+        Button(withdraw_win, text="Logout", font=("Arial", 15), bg="black", fg="white",
+               command=lambda: [withdraw_win.destroy(), parent.destroy(), self.create_login_screen()]).pack(
+            side="left", padx=20, pady=20)
+
+    def show_personal_info(self, parent):
+        """Display a window showing the personal information of the current user."""
+        info_win = Toplevel(parent)
+        info_win.title("Personal Information")
+        info_win.geometry("500x350")
+        info_win.configure(bg="white")
+        info_win.resizable(False, False)
+
+        Label(info_win, text=f"Personal Data of {self.current_user['uname']}", font=("Arial", 30),
+              bg="white").pack(pady=10)
+        Label(info_win, text=f"Name: {self.current_user['name']}", font=("Arial", 18),
+              bg="white").pack(pady=5)
+        Label(info_win, text=f"Age: {self.current_user['age']}", font=("Arial", 18),
+              bg="white").pack(pady=5)
+        gender_str = "Male" if self.current_user['gender'] else "Female"
+        Label(info_win, text=f"Gender: {gender_str}", font=("Arial", 18),
+              bg="white").pack(pady=5)
+        Label(info_win, text=f"Balance: {self.current_user['balance']}", font=("Arial", 18),
+              bg="white").pack(pady=5)
+
+        def back_to_dashboard():
+            info_win.destroy()
+            parent.deiconify()
+
+        Button(info_win, text="Back", font=("Arial", 15), bg="black", fg="white",
+               command=back_to_dashboard).pack(side="right", padx=20, pady=20)
+        Button(info_win, text="Logout", font=("Arial", 15), bg="black", fg="white",
+               command=lambda: [info_win.destroy(), parent.destroy(), self.create_login_screen()]).pack(
+            side="left", padx=20, pady=20)
 
 
-Label(master, text='LOGIN', font=('arial', 40),
-      bg='white').place(anchor=CENTER, relx=.5, rely=.12)
-
-
-Label(master, text='Username', font=('arial', 20),
-      bg='white').place(anchor=CENTER, relx=.2, rely=.3)
-entry(master, font=('arial', 18), justify="center",
-      textvariable=userName).place(anchor=CENTER, relx=.65, rely=.3)
-
-Label(master, text='Password', font=('arial', 20),
-      bg='white').place(anchor=CENTER, relx=.2, rely=.4)
-passEntry = entry(master, font=('arial', 18), justify="center", textvariable=passw,
-      show="⭕")
-passEntry.place(anchor=CENTER, relx=.65, rely=.4)
-
-def toggle_password_visibility():
-    if passEntry.cget("show") == "⭕":
-        passEntry.config(show="")
-        passEye.config(fg='red')
-    else:
-        passEye.config(fg='white')
-        passEntry.config(show="⭕")
-passEye = Button(master,text='👁',font=('arial',14),bg='black',fg='white',command=toggle_password_visibility,border=0,borderwidth=0)
-passEye.place(anchor = CENTER, relx = .88, rely = .4)
-
-Button(master, text='Login', font=('arial', 18), fg='white', bg='black',
-       cursor="circle", command=doLogin).place(anchor=CENTER, relx=.5, rely=.55)
-Label(master, text="Don't have an account then", font=('arial', 15),
-      bg='white').place(anchor=CENTER, relx=.4, rely=.66)
-Button(master, text='Sign Up', font=('arial', 15), fg='blue', borderwidth=0, bg='white',
-       cursor="circle", command=doRegister).place(anchor=CENTER, relx=.72, rely=.66)
-master.mainloop()
+if __name__ == "__main__":
+    root = Tk()
+    app = BankApp(root)
+    root.mainloop()
