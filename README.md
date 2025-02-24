@@ -37,6 +37,10 @@ This is a simple bank application implemented using Python's Tkinter library for
    python BankAppWithTkinter.py
    ```
 
+   ```sh
+   py BankAppWithTkinter.py
+   ```
+   
 ## Usage
 
 ### Registration
