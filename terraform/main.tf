@@ -18,10 +18,10 @@ resource "aws_instance" "bank_app_instance" {
       # Install Python3 and Git via Chocolatey
       "choco install python3 -y",
       "choco install git -y",
-      # Clone the repository (update the URL to your repository)
-      "git clone https://github.com/your-username/BankAppProject.git C:\\BankAppProject",
+      # Clone the repository
+      "git clone https://github.com/chintanboghara/BankApp-With-Tkinter.git C:\\BankApp-With-Tkinter",
       # Launch the Bank Application (GUI visible via RDP)
-      "Start-Process -FilePath 'python' -ArgumentList 'C:\\BankAppProject\\BankAppWithTkinter.py'"
+      "Start-Process -FilePath 'python' -ArgumentList 'C:\\BankApp-With-Tkinter\\BankAppWithTkinter.py'"
     ]
     connection {
       type     = "winrm"
