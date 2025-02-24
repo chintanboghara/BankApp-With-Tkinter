@@ -13,13 +13,14 @@ resource "aws_instance" "bank_app_instance" {
 
   provisioner "remote-exec" {
     inline = [
-      # Install Chocolatey (if not already installed)
+      # Install Chocolatey
       "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = 'Tls12'; iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))",
+      # Install Python3 and Git via Chocolatey
       "choco install python3 -y",
       "choco install git -y",
       # Clone the repository (update the URL to your repository)
       "git clone https://github.com/your-username/BankAppProject.git C:\\BankAppProject",
-      # Launch the Bank Application (GUI will be visible via RDP)
+      # Launch the Bank Application (GUI visible via RDP)
       "Start-Process -FilePath 'python' -ArgumentList 'C:\\BankAppProject\\BankAppWithTkinter.py'"
     ]
     connection {
