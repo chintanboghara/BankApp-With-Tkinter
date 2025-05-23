@@ -26,6 +26,9 @@ This is a simple bank application built using Python's Tkinter library for the g
 - **Password Visibility Toggle:**  
   An eye icon next to the password field allows toggling between hidden and visible text for improved usability.
 
+- **Transaction History:**  
+  Users can view a history of their deposits and withdrawals, including the type of transaction, amount, and timestamp. This is accessible from the dashboard.
+
 ## Installation
 
 1. **Python 3.x:**  
@@ -65,6 +68,7 @@ This is a simple bank application built using Python's Tkinter library for the g
 - **Personal Info:** View your personal details.
 - **Deposit:** Add funds to your account.
 - **Withdraw:** Remove funds from your account.
+- **Transaction History:** View a log of your past deposits and withdrawals.
 - **Logout:** Exit to the login screen.
 
 ### Password Visibility
@@ -87,11 +91,17 @@ This is a simple bank application built using Python's Tkinter library for the g
 - **Personal Info Page (`pScreen`):**  
   A window showing the logged-in user's information.
 
+- **Transaction History Display:**  
+  A window accessible from the dashboard (via the `show_transaction_history` method in `BankApp`) that displays a table of the user's past transactions (deposits and withdrawals) with timestamps, types, and amounts.
+
 - **File I/O Helpers:**  
-  Functions `load_user_data` and `save_user_data` handle reading from and writing to `appData.bin`, with error management.
+  Functions `load_user_data` and `save_user_data` handle reading from and writing to `appData.bin`, with error management. The `load_user_data` function also ensures that user records have a `transactions` list, initializing it if missing for backward compatibility.
 
 - **Object-Oriented Design:**  
   Encapsulated within a `BankApp` class, organizing UI, event handling, and data management for maintainability.
+
+- **Unit Tests (`test_bank_app.py`):**  
+  A suite of unit tests using Python's `unittest` module to verify the core logic of the application, including data manipulation, user authentication, transaction processing, and utility functions. These tests help ensure code reliability and facilitate safer modifications.
 
 ## Data Storage
 
@@ -102,6 +112,7 @@ User data is stored in a binary file, `appData.bin`, using Python's `pickle` mod
 - `age`: Age
 - `balance`: Account balance
 - `name`: Full name
+- `transactions`: A list of dictionaries, where each dictionary represents a transaction and contains `type` ('deposit' or 'withdrawal'), `amount`, and `timestamp`.
 
 ## Error Handling
 
@@ -113,3 +124,15 @@ User data is stored in a binary file, `appData.bin`, using Python's `pickle` mod
 
 - **Robust File I/O:**  
   Helper functions manage file operations, gracefully handling missing or corrupted data.
+
+## Running Tests
+
+Unit tests are provided to verify the application's core logic. These tests ensure that data handling, user operations (registration, login, deposit, withdrawal), and utility functions work as expected.
+
+To run the tests, navigate to the project's root directory in your terminal and execute:
+
+```sh
+python test_bank_app.py
+```
+
+The tests will run, and you'll see output indicating the status of each test (e.g., OK, FAILED, ERROR). This helps in identifying any regressions or issues after making changes to the codebase.
