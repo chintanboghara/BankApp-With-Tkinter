@@ -3,6 +3,7 @@ import pickle
 import re
 import logging
 import hashlib
+from datetime import datetime
 from tkinter import *
 from tkinter import ttk, messagebox
 
@@ -59,6 +60,10 @@ def load_user_data() -> list:
     try:
         with open(DATA_FILE, 'rb') as f:
             data = pickle.load(f)
+            # Ensure each user has a 'transactions' key
+            for user in data:
+                if 'transactions' not in user:
+                    user['transactions'] = []
             logging.info("User data loaded successfully.")
             return data
     except Exception as e:
@@ -296,6 +301,8 @@ class BankApp:
                command=lambda: self.show_withdraw(dashboard, balance_label)).pack(pady=5)
         Button(dashboard, text="Personal Info", font=("Arial", 15), bg="black", fg="white",
                command=lambda: self.show_personal_info(dashboard)).pack(pady=5)
+        Button(dashboard, text="Transaction History", font=("Arial", 15), bg="black", fg="white",
+               command=lambda: self.show_transaction_history(dashboard, balance_label)).pack(pady=5)
         Button(dashboard, text="Logout", font=("Arial", 15), bg="black", fg="white", command=logout).pack(pady=20)
 
     def update_user_balance(self, new_balance: int) -> None:
@@ -339,6 +346,14 @@ class BankApp:
             if int(amount) <= 0:
                 messagebox.showerror("Invalid Amount", "Amount must be greater than zero")
                 return
+            
+            transaction = {
+                'type': 'deposit',
+                'amount': int(amount),
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            self.current_user['transactions'].append(transaction)
+            
             new_balance = int(self.current_user['balance']) + int(amount)
             self.update_user_balance(new_balance)
             messagebox.showinfo("Success", "Deposit Successful")
@@ -378,6 +393,14 @@ class BankApp:
             if int(self.current_user['balance']) - int(amount) < 0:
                 messagebox.showerror("Invalid Amount", "Insufficient funds")
                 return
+
+            transaction = {
+                'type': 'withdrawal',
+                'amount': int(amount),
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            self.current_user['transactions'].append(transaction)
+
             new_balance = int(self.current_user['balance']) - int(amount)
             self.update_user_balance(new_balance)
             messagebox.showinfo("Success", f"Withdraw successful of ${amount}")
@@ -411,6 +434,39 @@ class BankApp:
         Button(info_win, text="Back", font=("Arial", 15), bg="black", fg="white", command=back_to_dashboard).pack(side="right", padx=20, pady=20)
         Button(info_win, text="Logout", font=("Arial", 15), bg="black", fg="white",
                command=lambda: [info_win.destroy(), parent.destroy(), self.create_login_screen()]).pack(side="left", padx=20, pady=20)
+
+    def show_transaction_history(self, parent: Toplevel, balance_label: Label) -> None:
+        """Display the transaction history window."""
+        history_win = Toplevel(parent)
+        history_win.title("Transaction History")
+        history_win.geometry("600x400")
+        history_win.configure(bg="white")
+        history_win.resizable(False, False)
+
+        Label(history_win, text=f"Transaction History for {self.current_user['uname']}", font=("Arial", 20), bg="white").pack(pady=10)
+
+        cols = ("Timestamp", "Type", "Amount")
+        tree = ttk.Treeview(history_win, columns=cols, show="headings")
+        for col in cols:
+            tree.heading(col, text=col)
+            tree.column(col, width=180, anchor=CENTER)
+        
+        # Add a scrollbar
+        scrollbar = ttk.Scrollbar(history_win, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        tree.pack(expand=True, fill="both", padx=10, pady=10)
+
+        transactions = self.current_user.get('transactions', [])
+        if not transactions:
+            Label(history_win, text="No transactions yet.", font=("Arial", 15), bg="white").pack(pady=20)
+        else:
+            for tx in transactions:
+                tree.insert("", "end", values=(tx['timestamp'], tx['type'].title(), tx['amount']))
+
+        Button(history_win, text="Back", font=("Arial", 15), bg="black", fg="white", command=history_win.destroy).pack(side="right", padx=20, pady=20)
+        Button(history_win, text="Logout", font=("Arial", 15), bg="black", fg="white",
+               command=lambda: [history_win.destroy(), parent.destroy(), self.create_login_screen()]).pack(side="left", padx=20, pady=20)
 
 
 if __name__ == "__main__":
