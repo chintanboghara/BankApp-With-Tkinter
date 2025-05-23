@@ -111,6 +111,39 @@ class BankApp:
         # Variables for login screen.
         self.username_var = StringVar()
         self.password_var = StringVar()
+        
+        # Apply a ttk theme
+        style = ttk.Style()
+        try:
+            # Attempt to use 'clam', a common modern theme
+            style.theme_use('clam') 
+        except Exception as e:
+            logging.warning(f"Failed to apply 'clam' theme, using default: {e}")
+            # Fallback to default if 'clam' is not available or fails
+            # Ensure a theme is actually available before trying to use its name
+            available_themes = style.theme_names()
+            if available_themes:
+                style.theme_use(available_themes[0])
+            else:
+                logging.error("No ttk themes available.")
+        
+        # Define custom styles for buttons for better contrast and visual hierarchy
+        # Accent button for primary actions (e.g., Login, Register, Deposit, Withdraw)
+        style.configure("Accent.TButton", foreground="white", background="#007bff", font=("Arial", 10, "bold"))
+        style.map("Accent.TButton",
+            background=[('active', '#0056b3'), ('pressed', '#004085')],
+            foreground=[('active', 'white')])
+
+        # Link button for secondary actions (e.g., Sign Up, Sign In links)
+        style.configure("Link.TButton", foreground="#007bff", relief="flat", borderwidth=0)
+        style.map("Link.TButton",
+            foreground=[('active', '#0056b3'), ('pressed', '#004085')],
+            underline=[('active', True)])
+        
+        # Standard buttons will use the default 'clam' TButton style which generally has good contrast.
+        # If specific adjustments were needed for the eye toggle button, it could be:
+        # style.configure("Eye.TButton", font=("Arial", 12), padding=2) 
+        # For now, default TButton for the eye toggle.
 
         self.create_login_screen()
 
@@ -140,18 +173,22 @@ class BankApp:
         self.entry_password.grid(row=1, column=1, pady=10, padx=10)
 
         # Toggle password visibility button.
-        btn_toggle = Button(
-            frame, text="👁", font=("Arial", 14), bg="black", fg="white",
-            command=self.toggle_password_visibility, border=0
+        # Note: ttk.Button may not support bg/fg and border styling as directly as tk.Button.
+        # Theme will handle styling. Font can be set via ttk.Style if needed globally.
+        btn_toggle = ttk.Button(
+            frame, text="👁",
+            command=self.toggle_password_visibility
+            # Using default TButton style from 'clam', which should be clear.
+            # If specific styling like "Eye.TButton" was defined above, it would be used here.
         )
         btn_toggle.grid(row=1, column=2, padx=5)
 
-        Button(self.master, text="Login", font=("Arial", 18), bg="black", fg="white", command=self.do_login).pack(pady=20)
+        ttk.Button(self.master, text="Login", command=self.do_login, style="Accent.TButton").pack(pady=20)
 
         Label(self.master, text="Don't have an account?", font=("Arial", 15), bg="white").pack()
-        Button(
-            self.master, text="Sign Up", font=("Arial", 15), fg="blue", bg="white", borderwidth=0,
-            command=self.create_register_screen
+        ttk.Button(
+            self.master, text="Sign Up",
+            command=self.create_register_screen, style="Link.TButton"
         ).pack(pady=10)
 
     def toggle_password_visibility(self) -> None:
@@ -228,25 +265,30 @@ class BankApp:
                 return
 
             balance = int(float(balance_str))
-            users = load_user_data()
-            for user in users:
-                if user["uname"] == uname:
+            
+            users = load_user_data() # Load existing users to check for duplicates
+            for user_check in users: 
+                if user_check["uname"] == uname:
                     messagebox.showerror("Invalid Username", "User already exists.")
                     return
 
-            new_user = {
-                "uname": uname,
-                "name": full_name,
-                "age": age,
-                "gender": gender,
-                "balance": balance,
-                "pass": hash_password(passwd)
-            }
-            users.append(new_user)
-            save_user_data(users)
-            messagebox.showinfo("Success", "User Registered Successfully")
-            logging.info("New user registered: %s", uname)
-            back_to_login()
+            # Confirmation Dialog for Registration
+            if messagebox.askyesno("Confirm Registration", "Are you sure you want to register with these details?"):
+                new_user = {
+                    "uname": uname,
+                    "name": full_name,
+                    "age": age,
+                    "gender": gender,
+                    "balance": balance,
+                    "pass": hash_password(passwd),
+                    "transactions": [] # Ensure new users have transactions list
+                }
+                users.append(new_user)
+                save_user_data(users)
+                messagebox.showinfo("Success", "User Registered Successfully")
+                logging.info("New user registered: %s", uname)
+                back_to_login()
+            # If user clicks "No", they remain on the registration screen with data intact.
 
         Label(register_window, text="Sign Up", font=("Arial", 40), bg="white").pack(pady=20)
         form_frame = Frame(register_window, bg="white")
@@ -262,10 +304,11 @@ class BankApp:
         ttk.Entry(form_frame, font=("Arial", 18), textvariable=reg_vars["age"], justify="center").grid(row=2, column=1, pady=5, padx=10)
 
         Label(form_frame, text="Gender", font=("Arial", 20), bg="white").grid(row=3, column=0, pady=5, padx=10, sticky=E)
-        gender_frame = Frame(form_frame, bg="white")
+        gender_frame = Frame(form_frame, bg="white") # Frame bg might be overridden by theme on children
         gender_frame.grid(row=3, column=1, pady=5, padx=10)
-        Radiobutton(gender_frame, text="Male", font=("Arial", 20), bg="white", variable=reg_vars["gender"], value=1).pack(side=LEFT, padx=5)
-        Radiobutton(gender_frame, text="Female", font=("Arial", 20), bg="white", variable=reg_vars["gender"], value=0).pack(side=LEFT, padx=5)
+        # Font for ttk.Radiobutton can be set via style if needed
+        ttk.Radiobutton(gender_frame, text="Male", variable=reg_vars["gender"], value=1).pack(side=LEFT, padx=5)
+        ttk.Radiobutton(gender_frame, text="Female", variable=reg_vars["gender"], value=0).pack(side=LEFT, padx=5)
 
         Label(form_frame, text="Balance", font=("Arial", 20), bg="white").grid(row=4, column=0, pady=5, padx=10, sticky=E)
         ttk.Entry(form_frame, font=("Arial", 18), textvariable=reg_vars["balance"], justify="center").grid(row=4, column=1, pady=5, padx=10)
@@ -273,9 +316,9 @@ class BankApp:
         Label(form_frame, text="Password", font=("Arial", 20), bg="white").grid(row=5, column=0, pady=5, padx=10, sticky=E)
         ttk.Entry(form_frame, font=("Arial", 18), textvariable=reg_vars["password"], justify="center", show="*").grid(row=5, column=1, pady=5, padx=10)
 
-        Button(register_window, text="Register", font=("Arial", 18), bg="black", fg="white", command=save_user).pack(pady=20)
+        ttk.Button(register_window, text="Register", command=save_user, style="Accent.TButton").pack(pady=20)
         Label(register_window, text="Already have an account?", font=("Arial", 15), bg="white").pack()
-        Button(register_window, text="Sign In", font=("Arial", 15), fg="blue", bg="white", borderwidth=0, command=back_to_login).pack(pady=10)
+        ttk.Button(register_window, text="Sign In", command=back_to_login, style="Link.TButton").pack(pady=10)
 
     def show_dashboard(self) -> None:
         """Display the dashboard with options for deposit, withdrawal, and personal information."""
@@ -290,20 +333,21 @@ class BankApp:
         balance_label.pack()
 
         def logout() -> None:
-            self.current_user = None
-            dashboard.destroy()
-            self.create_login_screen()
-            self.master.deiconify()
-
-        Button(dashboard, text="Deposit", font=("Arial", 15), bg="black", fg="white",
-               command=lambda: self.show_deposit(dashboard, balance_label)).pack(pady=5)
-        Button(dashboard, text="Withdraw", font=("Arial", 15), bg="black", fg="white",
-               command=lambda: self.show_withdraw(dashboard, balance_label)).pack(pady=5)
-        Button(dashboard, text="Personal Info", font=("Arial", 15), bg="black", fg="white",
-               command=lambda: self.show_personal_info(dashboard)).pack(pady=5)
-        Button(dashboard, text="Transaction History", font=("Arial", 15), bg="black", fg="white",
-               command=lambda: self.show_transaction_history(dashboard, balance_label)).pack(pady=5)
-        Button(dashboard, text="Logout", font=("Arial", 15), bg="black", fg="white", command=logout).pack(pady=20)
+            if messagebox.askyesno("Confirm Logout", "Are you sure you want to logout?"):
+                self.current_user = None
+                dashboard.destroy()
+                self.create_login_screen()
+                self.master.deiconify()
+        
+        ttk.Button(dashboard, text="Deposit",
+                   command=lambda: self.show_deposit(dashboard, balance_label)).pack(pady=5)
+        ttk.Button(dashboard, text="Withdraw",
+                   command=lambda: self.show_withdraw(dashboard, balance_label)).pack(pady=5)
+        ttk.Button(dashboard, text="Personal Info",
+                   command=lambda: self.show_personal_info(dashboard)).pack(pady=5)
+        ttk.Button(dashboard, text="Transaction History",
+                   command=lambda: self.show_transaction_history(dashboard, balance_label)).pack(pady=5)
+        ttk.Button(dashboard, text="Logout", command=logout).pack(pady=20) # Already updated to call the wrapped logout
 
     def update_user_balance(self, new_balance: int) -> None:
         """
@@ -360,10 +404,17 @@ class BankApp:
             bal_lbl.config(text=f"Balance: {new_balance}")
             balance_label.config(text=f"Balance: {new_balance}")
 
-        Button(deposit_win, text="Deposit", font=("Arial", 15), bg="black", fg="white", command=deposit_process).pack(pady=10)
-        Button(deposit_win, text="Back", font=("Arial", 15), bg="black", fg="white", command=deposit_win.destroy).pack(side="right", padx=20, pady=20)
-        Button(deposit_win, text="Logout", font=("Arial", 15), bg="black", fg="white",
-               command=lambda: [deposit_win.destroy(), parent.destroy(), self.create_login_screen()]).pack(side="left", padx=20, pady=20)
+        ttk.Button(deposit_win, text="Deposit", command=deposit_process, style="Accent.TButton").pack(pady=10)
+        ttk.Button(deposit_win, text="Back", command=deposit_win.destroy).pack(side="right", padx=20, pady=20)
+        
+        def confirm_logout_from_deposit():
+            if messagebox.askyesno("Confirm Logout", "Are you sure you want to logout?"):
+                deposit_win.destroy()
+                parent.destroy() # This is the dashboard window
+                self.create_login_screen()
+                self.master.deiconify()
+        
+        ttk.Button(deposit_win, text="Logout", command=confirm_logout_from_deposit).pack(side="left", padx=20, pady=20)
 
     def show_withdraw(self, parent: Toplevel, balance_label: Label) -> None:
         """Display the withdrawal window."""
@@ -407,10 +458,17 @@ class BankApp:
             bal_lbl.config(text=f"Balance: {new_balance}")
             balance_label.config(text=f"Balance: {new_balance}")
 
-        Button(withdraw_win, text="Withdraw", font=("Arial", 15), bg="black", fg="white", command=withdraw_process).pack(pady=10)
-        Button(withdraw_win, text="Back", font=("Arial", 15), bg="black", fg="white", command=withdraw_win.destroy).pack(side="right", padx=20, pady=20)
-        Button(withdraw_win, text="Logout", font=("Arial", 15), bg="black", fg="white",
-               command=lambda: [withdraw_win.destroy(), parent.destroy(), self.create_login_screen()]).pack(side="left", padx=20, pady=20)
+        ttk.Button(withdraw_win, text="Withdraw", command=withdraw_process, style="Accent.TButton").pack(pady=10)
+        ttk.Button(withdraw_win, text="Back", command=withdraw_win.destroy).pack(side="right", padx=20, pady=20)
+
+        def confirm_logout_from_withdraw():
+            if messagebox.askyesno("Confirm Logout", "Are you sure you want to logout?"):
+                withdraw_win.destroy()
+                parent.destroy() # This is the dashboard window
+                self.create_login_screen()
+                self.master.deiconify()
+
+        ttk.Button(withdraw_win, text="Logout", command=confirm_logout_from_withdraw).pack(side="left", padx=20, pady=20)
 
     def show_personal_info(self, parent: Toplevel) -> None:
         """Display a window showing the personal information of the current user."""
@@ -431,9 +489,15 @@ class BankApp:
             info_win.destroy()
             parent.deiconify()
 
-        Button(info_win, text="Back", font=("Arial", 15), bg="black", fg="white", command=back_to_dashboard).pack(side="right", padx=20, pady=20)
-        Button(info_win, text="Logout", font=("Arial", 15), bg="black", fg="white",
-               command=lambda: [info_win.destroy(), parent.destroy(), self.create_login_screen()]).pack(side="left", padx=20, pady=20)
+        def confirm_logout_from_personal_info():
+            if messagebox.askyesno("Confirm Logout", "Are you sure you want to logout?"):
+                info_win.destroy()
+                parent.destroy() # This is the dashboard window
+                self.create_login_screen()
+                self.master.deiconify()
+        
+        ttk.Button(info_win, text="Back", command=back_to_dashboard).pack(side="right", padx=20, pady=20)
+        ttk.Button(info_win, text="Logout", command=confirm_logout_from_personal_info).pack(side="left", padx=20, pady=20)
 
     def show_transaction_history(self, parent: Toplevel, balance_label: Label) -> None:
         """Display the transaction history window."""
@@ -464,12 +528,25 @@ class BankApp:
             for tx in transactions:
                 tree.insert("", "end", values=(tx['timestamp'], tx['type'].title(), tx['amount']))
 
-        Button(history_win, text="Back", font=("Arial", 15), bg="black", fg="white", command=history_win.destroy).pack(side="right", padx=20, pady=20)
-        Button(history_win, text="Logout", font=("Arial", 15), bg="black", fg="white",
-               command=lambda: [history_win.destroy(), parent.destroy(), self.create_login_screen()]).pack(side="left", padx=20, pady=20)
+        def confirm_logout_from_history():
+            if messagebox.askyesno("Confirm Logout", "Are you sure you want to logout?"):
+                history_win.destroy()
+                parent.destroy() # This is the dashboard window
+                self.create_login_screen()
+                self.master.deiconify()
+
+        ttk.Button(history_win, text="Back", command=history_win.destroy).pack(side="right", padx=20, pady=20)
+        ttk.Button(history_win, text="Logout", command=confirm_logout_from_history).pack(side="left", padx=20, pady=20)
 
 
 if __name__ == "__main__":
     root = Tk()
+    # It's better to apply the theme once the root window exists,
+    # so moving the style initialization here from BankApp.__init__ if it's better suited.
+    # However, having it in BankApp.__init__ is also fine as root is passed to it.
+    # For now, the change in BankApp.__init__ is kept.
+    # If issues arise, this is an alternative spot:
+    # style = ttk.Style(root)
+    # style.theme_use('clam') # or another theme
     app = BankApp(root)
     root.mainloop()

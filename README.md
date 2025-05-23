@@ -29,6 +29,9 @@ This is a simple bank application built using Python's Tkinter library for the g
 - **Transaction History:**  
   Users can view a history of their deposits and withdrawals, including the type of transaction, amount, and timestamp. This is accessible from the dashboard.
 
+- **Improved User Experience:**  
+  The application now utilizes Tkinter's themed widgets (`ttk`) for a more modern visual appearance and improved consistency. Critical actions like registration and logout now feature confirmation dialogs to prevent accidental operations and enhance usability.
+
 ## Installation
 
 1. **Python 3.x:**  
