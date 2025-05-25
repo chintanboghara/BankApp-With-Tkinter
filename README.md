@@ -1,9 +1,5 @@
 # BankApp with Tkinter
 
-[![CodeQL Advanced](https://github.com/chintanboghara/BankApp-With-Tkinter/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/chintanboghara/BankApp-With-Tkinter/actions/workflows/codeql.yml)
-
-## Overview
-
 This is a simple bank application built using Python's Tkinter library for the graphical user interface. The application enables users to register, log in, and perform basic banking operations such as depositing and withdrawing money. This improved version features an object-oriented design for enhanced structure, maintainability, and robust error handling.
 
 ## Features
