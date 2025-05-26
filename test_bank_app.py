@@ -8,21 +8,22 @@ import sqlite3
 
 # Assuming BankAppWithTkinter.py is in the same directory or accessible in PYTHONPATH
 from BankAppWithTkinter import (
-    hash_password,
-    # load_user_data, # Removed
-    # save_user_data, # Removed
+    hash_password_old_sha256, 
+    hash_password, 
+    verify_password, 
+    ITERATIONS, 
     is_number,
-    BankApp,  # Will be used carefully, potentially with mocked Tk
-    # DATA_FILE, # Removed
-    DB_PATH, # Added
+    BankApp,
+    DB_PATH, 
     initialize_database,
     create_user_sqlite,
     get_user_data_sqlite,
     update_user_balance_sqlite,
+    update_user_password_hash_sqlite, # Added
     record_transaction_sqlite,
     get_user_transactions_sqlite,
-    load_user_data_pickle, # For migration test
-    migrate_pickle_to_sqlite # For migration test
+    load_user_data_pickle, 
+    migrate_pickle_to_sqlite 
 )
 
 # Define a test-specific DB path (in-memory)
@@ -63,24 +64,93 @@ class TestBankAppLogic(unittest.TestCase):
         if os.path.exists(TEST_PICKLE_FILE):
             os.remove(TEST_PICKLE_FILE)
 
-    def test_hash_password(self):
-        """Test the hash_password function."""
+    def test_old_hash_password(self): # Renamed from test_hash_password
+        """Test the old hash_password_old_sha256 function."""
         pw1 = "password123"
         pw2 = "anotherPassword"
 
-        self.assertEqual(hash_password(pw1), hash_password(pw1))
-        self.assertNotEqual(hash_password(pw1), hash_password(pw2))
+        self.assertEqual(hash_password_old_sha256(pw1), hash_password_old_sha256(pw1))
+        self.assertNotEqual(hash_password_old_sha256(pw1), hash_password_old_sha256(pw2))
 
-        # Check if it's a hex digest
-        hashed_pw = hash_password(pw1)
+        hashed_pw = hash_password_old_sha256(pw1)
         self.assertIsInstance(hashed_pw, str)
         try:
-            int(hashed_pw, 16)
+            int(hashed_pw, 16) # Check if it's a hex digest
             is_hex = True
         except ValueError:
             is_hex = False
-        self.assertTrue(is_hex, "Password hash is not a valid hex string.")
+        self.assertTrue(is_hex, "Old password hash is not a valid hex string.")
         self.assertEqual(len(hashed_pw), 64) # SHA-256 produces 64 hex characters
+
+    def test_new_password_hashing_functions(self):
+        """Test the new PBKDF2 hash_password and verify_password functions."""
+        pw = "securePassword123"
+        
+        # Test hash_password (new PBKDF2)
+        hashed_pw_new = hash_password(pw)
+        self.assertIsInstance(hashed_pw_new, str)
+        self.assertTrue(hashed_pw_new.startswith("pbkdf2_sha256$"), "New hash should start with 'pbkdf2_sha256$'")
+        parts = hashed_pw_new.split('$')
+        self.assertEqual(len(parts), 4, "PBKDF2 hash string should have 4 parts.")
+        self.assertEqual(parts[0], "pbkdf2_sha256", "Algorithm part is incorrect.")
+        self.assertTrue(parts[1].isdigit(), "Iterations part should be a digit.")
+        self.assertEqual(int(parts[1]), ITERATIONS, "Iterations part does not match defined ITERATIONS.")
+        self.assertTrue(len(parts[2]) > 0, "Salt hex part should not be empty.")
+        self.assertTrue(len(parts[3]) > 0, "Key hex part should not be empty.")
+        # Attempt to decode salt and key from hex to check for valid hex format
+        try:
+            bytes.fromhex(parts[2])
+            bytes.fromhex(parts[3])
+        except ValueError:
+            self.fail("Salt or Key part of PBKDF2 hash is not valid hex.")
+        
+        # Test verify_password with new PBKDF2 hash
+        self.assertTrue(verify_password(pw, hashed_pw_new), "Verification of correct new hash failed.")
+        self.assertFalse(verify_password("wrongPassword", hashed_pw_new), "Verification of incorrect password with new hash succeeded.")
+        self.assertFalse(verify_password(pw, hashed_pw_new + "tamper"), "Verification of tampered new hash succeeded.") # Basic tamper check
+
+        # Test verify_password with old SHA-256 hash (backward compatibility)
+        old_plain_pw = "oldPassword456"
+        old_hashed_pw_str = hash_password_old_sha256(old_plain_pw)
+        self.assertTrue(verify_password(old_plain_pw, old_hashed_pw_str), "Verification of correct old hash failed.")
+        self.assertFalse(verify_password("wrongOldPassword", old_hashed_pw_str), "Verification of incorrect password with old hash succeeded.")
+        
+        # Test verify_password with malformed/invalid hashes
+        with patch('BankAppWithTkinter.logging') as mock_logging:
+            self.assertFalse(verify_password(pw, ""), "Verification of empty hash string succeeded.")
+            mock_logging.warning.assert_any_call("Verification attempt against an empty hash string.")
+
+            self.assertFalse(verify_password(pw, "juststring"), "Verification of non-format string succeeded.")
+            mock_logging.warning.assert_any_call("Malformed hash string: No '$' delimiter and not 64 chars. Got 10 chars.")
+            
+            self.assertFalse(verify_password(pw, "pbkdf2_sha256$1000$salt"), "Verification of too few parts succeeded.")
+            mock_logging.warning.assert_any_call("Malformed PBKDF2 hash string: Expected 4 parts, got 3. Hash starts with: pbkdf2_sha256$1000$salt...")
+
+            self.assertFalse(verify_password(pw, "unsupported_alg$1000$salt$key"), "Verification with wrong algorithm succeeded.")
+            mock_logging.warning.assert_any_call("Unsupported hash algorithm: 'unsupported_alg'. Expected 'pbkdf2_sha256'.")
+
+            self.assertFalse(verify_password(pw, f"pbkdf2_sha256$not_int${parts[2]}${parts[3]}"), "Verification with non-int iterations succeeded.")
+            mock_logging.error.assert_any_call(f"Error converting parts of PBKDF2 hash (iterations, salt, or key): invalid literal for int() with base 10: 'not_int'. Hash starts with: pbkdf2_sha256$not_int${parts[2]}...")
+            
+            self.assertFalse(verify_password(pw, f"pbkdf2_sha256$0${parts[2]}${parts[3]}"), "Verification with zero iterations succeeded.")
+            mock_logging.warning.assert_any_call("Invalid iteration count in hash: 0. Must be positive.")
+
+            self.assertFalse(verify_password(pw, f"pbkdf2_sha256${ITERATIONS}$nothexsalt${parts[3]}"), "Verification with non-hex salt succeeded.")
+            mock_logging.error.assert_any_call(f"Error converting parts of PBKDF2 hash (iterations, salt, or key): non-hexadecimal number found in fromhex() arg at position 0. Hash starts with: pbkdf2_sha256${ITERATIONS}$nothexsalt...")
+            
+            # Re-using parts[2] (a valid salt hex) to test non-hex key
+            self.assertFalse(verify_password(pw, f"pbkdf2_sha256${ITERATIONS}${parts[2]}$nothexkey"), "Verification with non-hex key succeeded.")
+            mock_logging.error.assert_any_call(f"Error converting parts of PBKDF2 hash (iterations, salt, or key): non-hexadecimal number found in fromhex() arg at position 0. Hash starts with: pbkdf2_sha256${ITERATIONS}${parts[2]}...")
+
+            short_salt_hex = "aabbcc" # 3 bytes, expected 16
+            short_key_hex = "ddeeff"  # 3 bytes, expected 32
+            self.assertFalse(verify_password(pw, f"pbkdf2_sha256${ITERATIONS}${short_salt_hex}${parts[3]}"), "Verification with short salt succeeded.")
+            mock_logging.warning.assert_any_call(f"Decoded salt length is 3, expected 16.")
+            self.assertFalse(verify_password(pw, f"pbkdf2_sha256${ITERATIONS}${parts[2]}${short_key_hex}"), "Verification with short key succeeded.")
+            mock_logging.warning.assert_any_call(f"Decoded key length is 3, expected 32.")
+
+            self.assertFalse(verify_password(pw, "g" * 64), "Verification of 64 non-hex chars (old format) succeeded.") # Non-hex old hash
+            mock_logging.warning.assert_any_call("Hash string (no '$') is not a valid hex string. Old format verification failed.")
 
     def test_is_number(self):
         """Test the is_number utility function."""
@@ -113,9 +183,17 @@ class TestBankAppLogic(unittest.TestCase):
         self.assertEqual(user1_updated_data["balance"], 150)
         self.assertFalse(update_user_balance_sqlite(TEST_DB_PATH, "nonexistentuser", 200))
 
+        # Test update_user_password_hash_sqlite
+        new_hash_for_user1 = hash_password("new_password_for_user1")
+        self.assertTrue(update_user_password_hash_sqlite(TEST_DB_PATH, "user1", new_hash_for_user1))
+        user1_reloaded = get_user_data_sqlite(TEST_DB_PATH, "user1")
+        self.assertEqual(user1_reloaded["password_hash"], new_hash_for_user1)
+        self.assertFalse(update_user_password_hash_sqlite(TEST_DB_PATH, "nonexistentuser", "newhash"))
+
+
         # Test record_transaction_sqlite
         # First, create another user for more comprehensive transaction tests
-        self.assertTrue(create_user_sqlite(TEST_DB_PATH, "user2", "hash2", "User Two", 25, 0, 50))
+        self.assertTrue(create_user_sqlite(TEST_DB_PATH, "user2", hash_password("user2pass"), "User Two", 25, 0, 50))
         
         ts1 = "2023-01-01 10:00:00"
         ts2 = "2023-01-01 11:00:00"
@@ -164,7 +242,9 @@ class TestBankAppLogic(unittest.TestCase):
         # Simulate BankApp's save_user behavior by directly using create_user_sqlite
         # In a real scenario, BankApp.save_user would be called, which then calls create_user_sqlite.
         # Here, we test if the underlying SQLite function works as expected for registration.
-        created = create_user_sqlite(TEST_DB_PATH, uname_valid, hash_password(pass_valid), 
+        # User password should be stored in the new PBKDF2 format.
+        hashed_pass_valid = hash_password(pass_valid)
+        created = create_user_sqlite(TEST_DB_PATH, uname_valid, hashed_pass_valid, 
                                      name_valid, age_valid, gender_valid, balance_valid)
         self.assertTrue(created)
         
@@ -172,6 +252,8 @@ class TestBankAppLogic(unittest.TestCase):
         self.assertIsNotNone(user_data_db)
         self.assertEqual(user_data_db["username"], uname_valid)
         self.assertEqual(user_data_db["full_name"], name_valid)
+        self.assertEqual(user_data_db["password_hash"], hashed_pass_valid) # Check new hash stored
+        self.assertTrue(user_data_db["password_hash"].startswith("pbkdf2_sha256$"), "Registered user hash is not in PBKDF2 format.")
 
         # Duplicate username check (create_user_sqlite should return False)
         created_duplicate = create_user_sqlite(TEST_DB_PATH, uname_valid, hash_password("anotherpass"),
@@ -186,39 +268,90 @@ class TestBankAppLogic(unittest.TestCase):
         """Simulate and test login logic with SQLite backend."""
         app = self._create_mock_app_instance()
         
-        uname_login = "loginuser"
-        pass_login = "goodpass"
-        initial_balance = 100
+        uname_login_new_hash = "loginuser_new"
+        pass_login_new_hash = "goodpass_new"
+        initial_balance_new = 150
         
-        # Setup user in DB
-        create_user_sqlite(TEST_DB_PATH, uname_login, hash_password(pass_login), 
-                           "Login TestUser", 40, 1, initial_balance)
+        # Setup user with new PBKDF2 hash
+        create_user_sqlite(TEST_DB_PATH, uname_login_new_hash, hash_password(pass_login_new_hash), 
+                           "Login NewHash User", 40, 1, initial_balance_new)
 
-        # Successful login
-        app.username_var.set(uname_login)
-        app.password_var.set(pass_login)
-        
-        # Mock messagebox to avoid GUI pop-ups
+        # Successful login with new hash
+        app.username_var.set(uname_login_new_hash)
+        app.password_var.set(pass_login_new_hash)
         with patch('BankAppWithTkinter.messagebox') as mock_messagebox:
-            app.do_login() # This method updates app.current_user
-        
-        self.assertIsNotNone(app.current_user)
-        self.assertEqual(app.current_user["uname"], uname_login)
-        self.assertEqual(app.current_user["balance"], initial_balance)
-        # Check if transactions are loaded (should be empty for new user)
-        self.assertIn('transactions', app.current_user)
-        self.assertEqual(len(app.current_user['transactions']), 0)
+            app.do_login()
+        self.assertIsNotNone(app.current_user, "Login with new hash failed.")
+        self.assertEqual(app.current_user["uname"], uname_login_new_hash)
         mock_messagebox.showinfo.assert_called_with("Success", "Login Successful")
+        app.current_user = None # Reset for next test
 
-        # Failed login - wrong password
+        # --- Test Gradual Migration (Login with Old SHA-256 Hash) ---
+        uname_login_old_hash = "loginuser_old"
+        pass_login_old_hash = "goodpass_old"
+        initial_balance_old = 200
+        old_hash_str = hash_password_old_sha256(pass_login_old_hash)
+
+        create_user_sqlite(TEST_DB_PATH, uname_login_old_hash, old_hash_str,
+                           "Login OldHash User", 50, 0, initial_balance_old)
+        
+        # Login with old hash
+        app.username_var.set(uname_login_old_hash)
+        app.password_var.set(pass_login_old_hash)
+        with patch('BankAppWithTkinter.messagebox') as mock_messagebox, \
+             patch('BankAppWithTkinter.logging') as mock_login_logging:
+            app.do_login()
+        
+        self.assertIsNotNone(app.current_user, "Login with old hash failed.")
+        self.assertEqual(app.current_user["uname"], uname_login_old_hash)
+        mock_messagebox.showinfo.assert_called_with("Success", "Login Successful")
+        
+        # Verify hash was updated in DB
+        user_data_after_login = get_user_data_sqlite(TEST_DB_PATH, uname_login_old_hash)
+        self.assertIsNotNone(user_data_after_login)
+        new_hash_in_db = user_data_after_login["password_hash"]
+        self.assertNotEqual(new_hash_in_db, old_hash_str, "Hash was not updated in DB after login with old hash.")
+        self.assertTrue(new_hash_in_db.startswith("pbkdf2_sha256$"), "Updated hash is not in PBKDF2 format.")
+        
+        # Verify logging message for hash upgrade
+        mock_login_logging.info.assert_any_call(f"User '{uname_login_old_hash}' logged in with an old format password hash. Attempting to upgrade.")
+        mock_login_logging.info.assert_any_call(f"Password hash for user '{uname_login_old_hash}' successfully updated to new format in DB.")
+
+        # Verify can still login with the same password (now checked against new hash)
+        app.current_user = None 
+        app.username_var.set(uname_login_old_hash)
+        app.password_var.set(pass_login_old_hash)
+        with patch('BankAppWithTkinter.messagebox') as mock_messagebox:
+            app.do_login()
+        self.assertIsNotNone(app.current_user, "Login after hash migration failed.")
+        self.assertEqual(app.current_user["uname"], uname_login_old_hash)
+        mock_messagebox.showinfo.assert_called_with("Success", "Login Successful")
         app.current_user = None # Reset
+
+        # --- Test failed login (wrong password) for user with old hash - ensure hash NOT updated ---
+        uname_login_old_hash_fail = "loginuser_old_fail"
+        pass_login_old_hash_fail = "pass_old_fail"
+        old_hash_fail_str = hash_password_old_sha256(pass_login_old_hash_fail)
+        create_user_sqlite(TEST_DB_PATH, uname_login_old_hash_fail, old_hash_fail_str, "OldHash Fail User", 60, 1, 300)
+
+        app.username_var.set(uname_login_old_hash_fail)
+        app.password_var.set("wrongpass") # Incorrect password
+        with patch('BankAppWithTkinter.messagebox') as mock_messagebox:
+            app.do_login()
+        self.assertIsNone(app.current_user)
+        mock_messagebox.showerror.assert_called_with("Login Failed", "Incorrect Username or Password")
+        user_data_after_failed_login = get_user_data_sqlite(TEST_DB_PATH, uname_login_old_hash_fail)
+        self.assertEqual(user_data_after_failed_login["password_hash"], old_hash_fail_str, "Hash was updated after a FAILED login attempt.")
+
+
+        # --- Standard Failed login tests ---
+        app.username_var.set(uname_login_new_hash) # Use a user with new hash
         app.password_var.set("badpass")
         with patch('BankAppWithTkinter.messagebox') as mock_messagebox:
             app.do_login()
         self.assertIsNone(app.current_user)
         mock_messagebox.showerror.assert_called_with("Login Failed", "Incorrect Username or Password")
 
-        # Failed login - user not found
         app.current_user = None # Reset
         app.username_var.set("nosuchuser")
         app.password_var.set("anypass")
@@ -227,6 +360,7 @@ class TestBankAppLogic(unittest.TestCase):
         self.assertIsNone(app.current_user)
         mock_messagebox.showerror.assert_called_with("Login Failed", "Incorrect Username or Password")
 
+
     def test_deposit_logic_simulation(self):
         """Simulate and test deposit logic with SQLite backend."""
         app = self._create_mock_app_instance()
@@ -234,15 +368,22 @@ class TestBankAppLogic(unittest.TestCase):
         uname_deposit = "deposituser"
         initial_balance = 500
         
-        # Setup user in DB
-        create_user_sqlite(TEST_DB_PATH, uname_deposit, "hash", "Deposit Test", 30, 1, initial_balance)
+        # Setup user in DB (using new hash format)
+        deposit_user_pass = "deposit_pass"
+        create_user_sqlite(TEST_DB_PATH, uname_deposit, hash_password(deposit_user_pass), 
+                           "Deposit Test", 30, 1, initial_balance)
         
         # Simulate login to set app.current_user correctly
+        user_db_data = get_user_data_sqlite(TEST_DB_PATH, uname_deposit)
         app.current_user = {
-            "id": get_user_data_sqlite(TEST_DB_PATH, uname_deposit)['id'], # Fetch ID
-            "uname": uname_deposit, "pass": "hash", "balance": initial_balance, 
-            "name": "Deposit Test", "age": 30, "gender": 1, 
-            "transactions": get_user_transactions_sqlite(TEST_DB_PATH, uname_deposit) # Should be empty
+            "id": user_db_data['id'], 
+            "uname": user_db_data['username'], 
+            "pass": user_db_data['password_hash'], # This is the new hash
+            "balance": user_db_data['balance'], 
+            "name": user_db_data['full_name'], 
+            "age": user_db_data['age'], 
+            "gender": user_db_data['gender'], 
+            "transactions": get_user_transactions_sqlite(TEST_DB_PATH, uname_deposit)
         }
         
         # Mock UI elements that deposit_process interacts with
@@ -338,12 +479,19 @@ class TestBankAppLogic(unittest.TestCase):
 
         uname_withdraw = "withdrawuser"
         initial_balance = 500
-        create_user_sqlite(TEST_DB_PATH, uname_withdraw, "hash", "Withdraw Test", 30, 1, initial_balance)
+        withdraw_user_pass = "withdraw_pass"
+        create_user_sqlite(TEST_DB_PATH, uname_withdraw, hash_password(withdraw_user_pass),
+                           "Withdraw Test", 30, 1, initial_balance)
         
+        user_db_data_withdraw = get_user_data_sqlite(TEST_DB_PATH, uname_withdraw)
         app.current_user = {
-            "id": get_user_data_sqlite(TEST_DB_PATH, uname_withdraw)['id'],
-            "uname": uname_withdraw, "pass": "hash", "balance": initial_balance,
-            "name": "Withdraw Test", "age": 30, "gender": 1, 
+            "id": user_db_data_withdraw['id'],
+            "uname": user_db_data_withdraw['username'], 
+            "pass": user_db_data_withdraw['password_hash'], 
+            "balance": user_db_data_withdraw['balance'],
+            "name": user_db_data_withdraw['full_name'], 
+            "age": user_db_data_withdraw['age'], 
+            "gender": user_db_data_withdraw['gender'], 
             "transactions": get_user_transactions_sqlite(TEST_DB_PATH, uname_withdraw)
         }
 
@@ -404,22 +552,25 @@ class TestBankAppLogic(unittest.TestCase):
     def test_migrate_pickle_to_sqlite(self):
         """Test the migrate_pickle_to_sqlite function."""
         # 1. Create a dummy pickle file (TEST_PICKLE_FILE)
+        # For migrate_pickle_to_sqlite, the 'pass' field in pickle data is assumed to be old SHA256.
+        # The migration function itself does not re-hash; it stores the hash as is from the pickle.
+        # The gradual migration during login handles updating these old hashes to new PBKDF2.
         dummy_pickle_data = [
             {
-                "uname": "pickleuser1", "pass": hash_password("picklepass1"), "name": "Pickle User One",
-                "age": 40, "gender": 1, "balance": 1000,
+                "uname": "pickleuser1", "pass": hash_password_old_sha256("picklepass1"), 
+                "name": "Pickle User One", "age": 40, "gender": 1, "balance": 1000,
                 "transactions": [
                     {'type': 'deposit', 'amount': 1000, 'timestamp': '2023-01-01 09:00:00'}
                 ]
             },
             {
-                "uname": "pickleuser2", "pass": hash_password("picklepass2"), "name": "Pickle User Two",
-                "age": 35, "gender": 0, "balance": 500,
-                "transactions": [] # No transactions
+                "uname": "pickleuser2", "pass": hash_password_old_sha256("picklepass2"), 
+                "name": "Pickle User Two", "age": 35, "gender": 0, "balance": 500,
+                "transactions": [] 
             },
-            { # User missing some non-critical data, but core data present
-                "uname": "pickleuser3", "pass": hash_password("picklepass3"), "name": "Pickle User Three",
-                "age": 20, "gender": 1, "balance": 100 # Transactions will default to empty if key missing
+            { 
+                "uname": "pickleuser3", "pass": hash_password_old_sha256("picklepass3"), 
+                "name": "Pickle User Three", "age": 20, "gender": 1, "balance": 100
             }
         ]
         with open(TEST_PICKLE_FILE, 'wb') as f:

@@ -104,14 +104,14 @@ This is a simple bank application built using Python's Tkinter library for the g
 
 ## Data Storage
 
-User data is stored in a binary file, `appData.bin`, using Python's `pickle` module. Each user's data is a dictionary with keys:
-- `uname`: Username
-- `pass`: Password
-- `gender`: Gender
+User data is stored in an SQLite database file (`bankapp.db`). Previously, data was stored in `appData.bin` using Python's `pickle` module; the application includes a one-time migration utility for users with existing `appData.bin` files. Each user's data in the database includes:
+- `username` (formerly `uname`): Username
+- `password_hash` (formerly `pass`): Securely hashed password. The application uses PBKDF2-SHA256 with a unique salt per user and a high iteration count (currently 260,000). The stored format is `pbkdf2_sha256$<iterations>$<salt_hex>$<key_hex>`. For users with accounts created with the older hashing method (plain SHA-256, typically found in migrated `appData.bin` files), their password hash will be automatically and seamlessly upgraded to the new PBKDF2-SHA256 format upon their next successful login. This significantly improves the security of stored passwords.
+- `gender`: Gender (stored as an integer)
 - `age`: Age
 - `balance`: Account balance
-- `name`: Full name
-- `transactions`: A list of dictionaries, where each dictionary represents a transaction and contains `type` ('deposit' or 'withdrawal'), `amount`, and `timestamp`.
+- `full_name` (formerly `name`): Full name
+- `transactions`: Stored in a separate `transactions` table linked to the user, where each transaction record contains `type` ('deposit' or 'withdrawal'), `amount`, and `timestamp`.
 
 ## Error Handling
 
