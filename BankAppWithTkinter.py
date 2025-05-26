@@ -122,6 +122,28 @@ def update_user_balance_sqlite(db_path: str, username: str, new_balance: int) ->
         return False
 
 
+def update_user_password_hash_sqlite(db_path: str, username: str, new_full_hash_string: str) -> bool:
+    """
+    Updates the password_hash for the specified username in the users table.
+    Returns True on success, False on failure.
+    """
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET password_hash = ? WHERE username = ?", (new_full_hash_string, username))
+            conn.commit()
+            if cursor.rowcount > 0:
+                logging.info("Password hash updated successfully for user '%s' in SQLite.", username)
+                return True
+            else:
+                # This could mean the user was not found, or the new hash is the same as the old one (less likely here)
+                logging.warning("Failed to update password hash for user '%s' in SQLite: User not found or no change made.", username)
+                return False
+    except sqlite3.Error as e:
+        logging.error("SQLite error updating password hash for user '%s': %s", username, e)
+        return False
+
+
 def record_transaction_sqlite(db_path: str, username: str, transaction_type: str, amount: int, timestamp: str) -> bool:
     """
     Records a new transaction for the user.
@@ -191,10 +213,12 @@ def is_number(s: str) -> bool:
     except ValueError:
         return False
 
+# --- Password Hashing (New Implementation) ---
+ITERATIONS = 260000 # Recommended by OWASP for PBKDF2-SHA256 as of a few years ago.
 
-def hash_password(password: str) -> str:
+def hash_password_old_sha256(password: str) -> str:
     """
-    Return the SHA-256 hash of the given password.
+    Return the direct SHA-256 hash of the given password (old method, kept for migration/verification).
     
     Args:
         password (str): The password to hash.
@@ -202,7 +226,100 @@ def hash_password(password: str) -> str:
     Returns:
         str: The hexadecimal digest of the password.
     """
-    return hashlib.sha256(password.encode()).hexdigest()
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
+
+
+def hash_password(password: str) -> str:
+    """
+    Hashes a password using PBKDF2-SHA256.
+    Stores algorithm, iterations, salt, and key in a single string.
+    Format: "pbkdf2_sha256$<iterations>$<salt_hex>$<key_hex>"
+    """
+    salt = os.urandom(16)  # 16 bytes salt is a common size
+    key = hashlib.pbkdf2_hmac(
+        'sha256',                # Hash algorithm
+        password.encode('utf-8'),# Password to hash
+        salt,                    # Salt
+        ITERATIONS,              # Iteration count
+        dklen=32                 # Derived key length (32 bytes = 256 bits)
+    )
+    # Store all necessary info to verify the password later
+    return f"pbkdf2_sha256${ITERATIONS}${salt.hex()}${key.hex()}"
+
+
+def verify_password(password_attempt: str, full_hashed_password_string: str) -> bool:
+    """
+    Verifies a password attempt against a stored hashed password string.
+    Handles both the new PBKDF2-SHA256 format and the old direct SHA-256 format.
+    """
+    if not full_hashed_password_string:
+        logging.warning("Verification attempt against an empty hash string.")
+        return False
+
+    if '$' not in full_hashed_password_string:
+        # Potentially an old SHA-256 hash (64 hex characters)
+        if len(full_hashed_password_string) == 64:
+            try:
+                # Validate it's a hex string; actual value doesn't matter here
+                int(full_hashed_password_string, 16) 
+                expected_hash_old = hash_password_old_sha256(password_attempt)
+                logging.info("Attempting password verification using old SHA-256 method.")
+                return hashlib.compare_digest(expected_hash_old, full_hashed_password_string)
+            except ValueError:
+                logging.warning("Hash string (no '$') is not a valid hex string. Old format verification failed.")
+                return False # Not a valid hex string
+        else:
+            logging.warning(f"Malformed hash string: No '$' delimiter and not 64 chars. Got {len(full_hashed_password_string)} chars.")
+            return False # Not old format, not new format
+    
+    # Assuming new PBKDF2 format: "pbkdf2_sha256$<iterations>$<salt_hex>$<key_hex>"
+    parts = full_hashed_password_string.split('$')
+    if len(parts) != 4:
+        logging.warning(f"Malformed PBKDF2 hash string: Expected 4 parts, got {len(parts)}. Hash starts with: {full_hashed_password_string[:30]}...")
+        return False
+
+    algorithm, iterations_str, salt_hex, stored_key_hex = parts
+
+    if algorithm != 'pbkdf2_sha256':
+        logging.warning(f"Unsupported hash algorithm: '{algorithm}'. Expected 'pbkdf2_sha256'.")
+        return False
+
+    try:
+        iterations = int(iterations_str)
+        if iterations <= 0: # Iterations must be positive
+            logging.warning(f"Invalid iteration count in hash: {iterations}. Must be positive.")
+            return False
+        salt_bytes = bytes.fromhex(salt_hex)
+        stored_key_bytes = bytes.fromhex(stored_key_hex)
+    except ValueError as e:
+        logging.error(f"Error converting parts of PBKDF2 hash (iterations, salt, or key): {e}. Hash starts with: {full_hashed_password_string[:30]}...")
+        return False
+    
+    # Validate expected lengths after conversion
+    if len(salt_bytes) != 16: # Salt was generated as 16 bytes
+        logging.warning(f"Decoded salt length is {len(salt_bytes)}, expected 16.")
+        return False
+    if len(stored_key_bytes) != 32: # Key was derived as 32 bytes (dklen=32)
+        logging.warning(f"Decoded key length is {len(stored_key_bytes)}, expected 32.")
+        return False
+
+    # Calculate the key from the password attempt using the stored parameters
+    new_key_bytes = hashlib.pbkdf2_hmac(
+        'sha256',
+        password_attempt.encode('utf-8'),
+        salt_bytes,
+        iterations,
+        dklen=32
+    )
+
+    # Compare the derived keys using a time-constant comparison
+    is_correct = hashlib.compare_digest(new_key_bytes, stored_key_bytes)
+    if is_correct:
+        logging.info("Password verification successful (PBKDF2-SHA256).")
+    else:
+        logging.info("Password verification failed (PBKDF2-SHA256).")
+    return is_correct
+# --- End Password Hashing ---
 
 
 def load_user_data_pickle(pickle_path: str = "appData.bin") -> list:
@@ -444,10 +561,27 @@ class BankApp:
         """Process login using provided credentials."""
         username = self.username_var.get().strip()
         password = self.password_var.get().strip()
-        hashed_input = hash_password(password)
+        # hashed_input = hash_password(password) # This would generate a new hash each time, not for verification
 
         user_data = get_user_data_sqlite(DB_PATH, username)
-        if user_data and user_data["password_hash"] == hashed_input:
+        # Use verify_password for login
+        if user_data and verify_password(password, user_data["password_hash"]):
+            stored_hash = user_data["password_hash"]
+            # Check for old hash format and upgrade if necessary
+            if '$' not in stored_hash and len(stored_hash) == 64: # Heuristic for old SHA256 hash
+                logging.info(f"User '{username}' logged in with an old format password hash. Attempting to upgrade.")
+                try:
+                    new_secure_hash = hash_password(password) # Generate new PBKDF2 hash
+                    if update_user_password_hash_sqlite(DB_PATH, username, new_secure_hash):
+                        user_data["password_hash"] = new_secure_hash # Update hash in current session's data
+                        logging.info(f"Password hash for user '{username}' successfully updated to new format in DB.")
+                    else:
+                        # If DB update fails, log warning but proceed with login for this session
+                        logging.warning(f"Failed to update password hash in DB for user '{username}'. Login will proceed with old hash for this session.")
+                except Exception as e:
+                    logging.error(f"An unexpected error occurred during password hash upgrade for user '{username}': {e}")
+                    # Log error but proceed with login as verification was successful.
+
             # Convert column names to match existing app's expectations if necessary
             # For example, 'username' -> 'uname', 'full_name' -> 'name', 'password_hash' -> 'pass'
             self.current_user = {
