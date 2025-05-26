@@ -5,7 +5,7 @@ This is a simple bank application built using Python's Tkinter library for the g
 ## Features
 
 - **User Registration:**  
-  Create a new account by entering a username, full name, age, gender, initial balance, and password. Input validation ensures names contain only alphabetic characters and numeric fields are correctly formatted.
+  Create a new account by entering a username, full name, age, gender, initial balance, and password. Input validation ensures names contain only alphabetic characters and numeric fields are correctly formatted. During registration, a password strength meter provides real-time feedback to help users choose a more secure password.
 
 - **User Login:**  
   Log in with a username and password, validated against stored user data.

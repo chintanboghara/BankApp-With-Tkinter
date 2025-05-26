@@ -13,6 +13,7 @@ from BankAppWithTkinter import (
     verify_password, 
     ITERATIONS, 
     is_number,
+    check_password_strength, # Added
     BankApp,
     DB_PATH, 
     initialize_database,
@@ -162,6 +163,83 @@ class TestBankAppLogic(unittest.TestCase):
         self.assertFalse(is_number("12a.3"))
         self.assertFalse(is_number(""))
         self.assertFalse(is_number(" "))
+
+    def test_check_password_strength(self):
+        # Test empty password
+        feedback = check_password_strength("")
+        self.assertEqual(feedback['level'], 'None')
+        self.assertEqual(feedback['text'], '')
+        self.assertEqual(feedback['color'], '') # Or whatever default it's set to for empty
+
+        # Test "Too Weak" passwords (score 0 or 1)
+        # Score 0 (e.g. <8 chars, one type) - or just too short
+        feedback = check_password_strength("abc") 
+        self.assertEqual(feedback['level'], 'Too Weak', f"Test 'abc': {feedback}")
+        self.assertEqual(feedback['text'], 'Strength: Too Weak')
+        self.assertEqual(feedback['color'], 'red')
+
+        feedback = check_password_strength("1234567") # Length < 8, only digits
+        self.assertEqual(feedback['level'], 'Too Weak', f"Test '1234567': {feedback}")
+        self.assertEqual(feedback['text'], 'Strength: Too Weak')
+        self.assertEqual(feedback['color'], 'red')
+
+        # Score 1 (e.g. length >= 8, but only one character type, no bonus length)
+        # feedback = check_password_strength("abcdefgh") # Length=8 (1pt), lowercase (1pt) -> score 2 expected -> Weak
+                                                      # Let's adjust test case for score 1:
+        feedback = check_password_strength("aaaaaaa") # Length < 8 (0pt), lowercase (1pt) -> score 1
+        self.assertEqual(feedback['level'], 'Too Weak', f"Test 'aaaaaaa': {feedback}") # Should be Too Weak
+        
+        feedback = check_password_strength("abcdefg") # len 7 (0), lower (1) = score 1
+        self.assertEqual(feedback['level'], 'Too Weak', f"Test 'abcdefg': {feedback}")
+        self.assertEqual(feedback['text'], 'Strength: Too Weak')
+        self.assertEqual(feedback['color'], 'red')
+
+
+        # Test "Weak" passwords (score 2)
+        feedback = check_password_strength("abcdefgh") # len 8 (1), lower (1) = score 2
+        self.assertEqual(feedback['level'], 'Weak', f"Test 'abcdefgh': {feedback}")
+        self.assertEqual(feedback['text'], 'Strength: Weak')
+        self.assertEqual(feedback['color'], 'orange red')
+
+        feedback = check_password_strength("Abcdefg") # len 7 (0), lower (1), upper (1) = score 2
+        self.assertEqual(feedback['level'], 'Weak', f"Test 'Abcdefg': {feedback}")
+        self.assertEqual(feedback['text'], 'Strength: Weak')
+        self.assertEqual(feedback['color'], 'orange red')
+
+        feedback = check_password_strength("12345678") # len 8 (1), digit (1) = score 2
+        self.assertEqual(feedback['level'], 'Weak', f"Test '12345678': {feedback}")
+
+        # Test "Medium" passwords (score 3 or 4)
+        feedback = check_password_strength("Abcdefgh") # len 8 (1), lower (1), upper (1) = score 3
+        self.assertEqual(feedback['level'], 'Medium', f"Test 'Abcdefgh': {feedback}")
+        self.assertEqual(feedback['text'], 'Strength: Medium')
+        self.assertEqual(feedback['color'], 'gold')
+
+        feedback = check_password_strength("Abcdef12") # len 8 (1), lower (1), upper (1), digit (1) = score 4
+        self.assertEqual(feedback['level'], 'Medium', f"Test 'Abcdef12': {feedback}")
+
+        feedback = check_password_strength("abcdefgh1!") # len 10 (1), lower (1), digit (1), special (1) = score 4
+        self.assertEqual(feedback['level'], 'Medium', f"Test 'abcdefgh1!': {feedback}")
+
+
+        # Test "Strong" passwords (score 5 or 6)
+        feedback = check_password_strength("Abcdef1!") # len 8 (1), lower (1), upper (1), digit (1), special (1) = score 5
+        self.assertEqual(feedback['level'], 'Strong', f"Test 'Abcdef1!': {feedback}")
+        self.assertEqual(feedback['text'], 'Strength: Strong')
+        self.assertEqual(feedback['color'], 'forest green')
+
+        feedback = check_password_strength("Abcdefgh123!") # len 12 (1+1 bonus), lower (1), upper (1), digit (1), special (1) = score 6
+        self.assertEqual(feedback['level'], 'Strong', f"Test 'Abcdefgh123!': {feedback}")
+        
+        feedback = check_password_strength("V€ryStr0ngP@ssword") # len 18 (2), lower (1), upper (1), digit (1), special (1) = score 6
+        self.assertEqual(feedback['level'], 'Strong', f"Test 'V€ryStr0ngP@ssword': {feedback}")
+
+        # Test case sensitivity of special characters if your regex is specific
+        # The current regex [!@#$%^&*()_+\-=\[\]{};':"\|,.<>\/?~`] is fine.
+
+        # Test all criteria met but just under 12 chars
+        feedback = check_password_strength("Abc1@efg") # len 8 (1), L(1), U(1), D(1), S(1) = score 5
+        self.assertEqual(feedback['level'], 'Strong', f"Test 'Abc1@efg': {feedback}")
 
     def test_sqlite_io_functions(self):
         """Test the SQLite I/O functions."""
