@@ -93,25 +93,34 @@ This is a simple bank application built using Python's Tkinter library for the g
 - **Transaction History Display:**  
   A window accessible from the dashboard (via the `show_transaction_history` method in `BankApp`) that displays a table of the user's past transactions (deposits and withdrawals) with timestamps, types, and amounts.
 
-- **File I/O Helpers:**  
-  Functions `load_user_data` and `save_user_data` handle reading from and writing to `appData.bin`, with error management. The `load_user_data` function also ensures that user records have a `transactions` list, initializing it if missing for backward compatibility.
-
 - **Object-Oriented Design:**  
   Encapsulated within a `BankApp` class, organizing UI, event handling, and data management for maintainability.
 
 - **Unit Tests (`test_bank_app.py`):**  
   A suite of unit tests using Python's `unittest` module to verify the core logic of the application, including data manipulation, user authentication, transaction processing, and utility functions. These tests help ensure code reliability and facilitate safer modifications.
 
-## Data Storage
+## Data Storage and Logging
 
-User data is stored in an SQLite database file (`bankapp.db`). Previously, data was stored in `appData.bin` using Python's `pickle` module; the application includes a one-time migration utility for users with existing `appData.bin` files. Each user's data in the database includes:
-- `username` (formerly `uname`): Username
-- `password_hash` (formerly `pass`): Securely hashed password. The application uses PBKDF2-SHA256 with a unique salt per user and a high iteration count (currently 260,000). The stored format is `pbkdf2_sha256$<iterations>$<salt_hex>$<key_hex>`. For users with accounts created with the older hashing method (plain SHA-256, typically found in migrated `appData.bin` files), their password hash will be automatically and seamlessly upgraded to the new PBKDF2-SHA256 format upon their next successful login. This significantly improves the security of stored passwords.
-- `gender`: Gender (stored as an integer)
-- `age`: Age
-- `balance`: Account balance
-- `full_name` (formerly `name`): Full name
+### Database
+User data is stored in an SQLite database file named `bankapp.db`. 
+The `bankapp.db` file is located in a user-specific application data directory: `~/.BankApp/bankapp.db` (the `~/.BankApp` directory is created automatically if it doesn't exist). This ensures user data is stored in a standard, user-private location.
+
+Previously, data was stored in `appData.bin` using Python's `pickle` module; the application includes a one-time migration utility for users with existing `appData.bin` files (this old file is looked for in the directory where the application is run).
+
+Each user's data in the database includes:
+- `username`: The user's chosen login name.
+- `password_hash`: Securely hashed password. The application uses PBKDF2-SHA256 with a unique salt per user and a high iteration count (currently 260,000). The stored format is `pbkdf2_sha256$<iterations>$<salt_hex>$<key_hex>`. For users with accounts created with the older hashing method (plain SHA-256, typically found in migrated `appData.bin` files), their password hash will be automatically and seamlessly upgraded to the new PBKDF2-SHA256 format upon their next successful login. This significantly improves the security of stored passwords.
+- `full_name`: The user's full name.
+- `age`: The user's age.
+- `gender`: The user's gender (stored as an integer).
+- `balance`: The user's current account balance.
 - `transactions`: Stored in a separate `transactions` table linked to the user, where each transaction record contains `type` ('deposit' or 'withdrawal'), `amount`, and `timestamp`.
+
+### Log File
+The application log (`bankapp.log`) is created in the same directory from which the application is run. 
+- When running from source, this is typically the project's root directory.
+- When using the packaged executable, this is the directory containing the executable file. 
+The log file implements rotation: it rotates when it reaches approximately 1MB, and up to 3 backup log files are kept.
 
 ## Error Handling
 
@@ -135,3 +144,33 @@ python test_bank_app.py
 ```
 
 The tests will run, and you'll see output indicating the status of each test (e.g., OK, FAILED, ERROR). This helps in identifying any regressions or issues after making changes to the codebase.
+
+## Building from Source
+
+To create a standalone executable from the source code, you can use PyInstaller.
+
+1.  **Virtual Environment (Recommended):**  
+    It is recommended to create and activate a virtual environment before installing dependencies and building:
+    ```bash
+    python -m venv venv
+    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+    ```
+
+2.  **Install PyInstaller:**  
+    Install PyInstaller using pip:
+    ```bash
+    pip install pyinstaller
+    ```
+
+3.  **Build the Application:**  
+    To build the application, run one of the following commands from the project's root directory:
+
+    *   Using direct command-line options:
+        ```bash
+        pyinstaller --name BankApp --onefile --windowed BankAppWithTkinter.py
+        ```
+    *   Using a spec file (if `BankApp.spec` is present and configured):
+        ```bash
+        pyinstaller BankApp.spec
+        ```
+    The distributable application (e.g., `BankApp.exe` on Windows or `BankApp` on macOS/Linux) will be found in the `dist` folder created by PyInstaller.
