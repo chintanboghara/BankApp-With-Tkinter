@@ -242,6 +242,65 @@ def is_number(s: str) -> bool:
     except ValueError:
         return False
 
+
+def check_password_strength(password: str) -> dict:
+    score = 0
+    feedback = {'level': '', 'text': '', 'color': 'black'} # Default color
+
+    if not password:
+        # Return empty feedback for empty password, color will be default label color
+        return {'level': 'None', 'text': '', 'color': ''} 
+
+    # Criteria checks
+    if len(password) >= 8:
+        score += 1
+    if re.search(r"[a-z]", password):
+        score += 1
+    if re.search(r"[A-Z]", password):
+        score += 1
+    if re.search(r"[0-9]", password):
+        score += 1
+    # Define a set of common special characters
+    # Note: Adjust the regex character set for special characters as needed.
+    # Escaping is important for some characters within a regex set, e.g., ] \ - ^
+    if re.search(r"[!@#$%^&*()_+\-=\[\]{};':"\|,.<>\/?~`]", password):
+        score += 1
+    
+    # Bonus for longer length
+    if len(password) >= 12:
+        score += 1 # Max score can be 6
+
+    # Map score to feedback
+    if score <= 1:
+        feedback['level'] = 'Too Weak'
+        feedback['text'] = 'Strength: Too Weak'
+        feedback['color'] = 'red'
+    elif score == 2:
+        feedback['level'] = 'Weak'
+        feedback['text'] = 'Strength: Weak'
+        feedback['color'] = 'orange red'
+    elif score >= 3 and score <= 4:
+        feedback['level'] = 'Medium'
+        feedback['text'] = 'Strength: Medium'
+        # Using a more common/safer yellow, Tkinter might not have DarkGoldenrod1 by default on all systems
+        # Or fallback to black text if yellow is hard to see.
+        feedback['color'] = 'gold' 
+    elif score >= 5: # Covers 5 and 6
+        feedback['level'] = 'Strong'
+        feedback['text'] = 'Strength: Strong'
+        feedback['color'] = 'forest green'
+    
+    # Safety net if somehow score is out of expected range, though unlikely with current logic
+    if not feedback['level']: # If somehow no level was set
+        if score > 4: feedback['level'] = 'Strong'
+        elif score > 2: feedback['level'] = 'Medium'
+        elif score > 1: feedback['level'] = 'Weak'
+        else: feedback['level'] = 'Too Weak'
+        feedback['text'] = f"Strength: {feedback['level']}"
+        feedback['color'] = 'black' # Fallback color
+
+    return feedback
+
 # --- Password Hashing (New Implementation) ---
 ITERATIONS = 260000 # Recommended by OWASP for PBKDF2-SHA256 as of a few years ago.
 
@@ -722,7 +781,30 @@ class BankApp:
         ttk.Entry(form_frame, font=("Arial", 18), textvariable=reg_vars["balance"], justify="center").grid(row=4, column=1, pady=5, padx=10)
 
         Label(form_frame, text="Password", font=("Arial", 20), bg="white").grid(row=5, column=0, pady=5, padx=10, sticky=E)
-        ttk.Entry(form_frame, font=("Arial", 18), textvariable=reg_vars["password"], justify="center", show="*").grid(row=5, column=1, pady=5, padx=10)
+        password_entry_field = ttk.Entry(form_frame, font=("Arial", 18), textvariable=reg_vars["password"], justify="center", show="*")
+        password_entry_field.grid(row=5, column=1, pady=5, padx=10)
+
+        # Password strength feedback label
+        # This label will be updated by a trace on reg_vars["password"] in the next step.
+        # Storing it on self.password_strength_feedback_label to make it accessible if the callback is a method,
+        # or it can be accessed via closure if the callback is a nested function.
+        # For now, let's assume it will be accessed via closure or passed to the callback setup.
+        password_strength_feedback_label = ttk.Label(form_frame, text="", font=("Arial", 10), foreground="grey")
+        password_strength_feedback_label.grid(row=6, column=1, sticky="w", padx=10, pady=(0,5)) # pady=(0,5) adds a little space below it
+
+        # Callback function for password strength
+        def update_password_strength_feedback(*args):
+            current_password = reg_vars["password"].get()
+            feedback = check_password_strength(current_password)
+            # The label is defined in the outer scope of create_register_screen,
+            # so it's accessible here via closure.
+            password_strength_feedback_label.config(
+                text=feedback['text'], 
+                foreground=feedback['color'] if feedback['color'] else 'grey' # Default to grey
+            )
+
+        # Add trace after both the StringVar and the Label are defined
+        reg_vars["password"].trace_add('write', update_password_strength_feedback)
 
         ttk.Button(register_window, text="Register", command=save_user, style="Accent.TButton").pack(pady=20)
         Label(register_window, text="Already have an account?", font=("Arial", 15), bg="white").pack()
