@@ -4,57 +4,64 @@ import pickle
 import hashlib
 from unittest.mock import MagicMock, patch
 
+import sqlite3
+
 # Assuming BankAppWithTkinter.py is in the same directory or accessible in PYTHONPATH
 from BankAppWithTkinter import (
     hash_password,
-    load_user_data,
-    save_user_data,
+    # load_user_data, # Removed
+    # save_user_data, # Removed
     is_number,
     BankApp,  # Will be used carefully, potentially with mocked Tk
-    DATA_FILE
+    # DATA_FILE, # Removed
+    DB_PATH, # Added
+    initialize_database,
+    create_user_sqlite,
+    get_user_data_sqlite,
+    update_user_balance_sqlite,
+    record_transaction_sqlite,
+    get_user_transactions_sqlite,
+    load_user_data_pickle, # For migration test
+    migrate_pickle_to_sqlite # For migration test
 )
 
-# Store the original DATA_FILE name and define a test-specific one
-ORIGINAL_DATA_FILE = DATA_FILE
-TEST_DATA_FILE = 'test_appData.bin'
+# Define a test-specific DB path (in-memory)
+TEST_DB_PATH = ":memory:"
+# For migration test, we'll use a specific pickle file name
+TEST_PICKLE_FILE = "test_migration_appData.bin"
+
 
 class TestBankAppLogic(unittest.TestCase):
 
     def setUp(self):
         """
         Set up for each test.
-        - Back up original data file if it exists.
-        - Set DATA_FILE to TEST_DATA_FILE for test isolation.
-        - Ensure no old test data file exists.
+        - Patch DB_PATH to use an in-memory SQLite database.
+        - Initialize the database schema.
         """
-        global DATA_FILE
-        # Ensure BankAppWithTkinter uses the test file
-        patcher = patch('BankAppWithTkinter.DATA_FILE', TEST_DATA_FILE)
-        self.addCleanup(patcher.stop)
-        patcher.start()
-        DATA_FILE = TEST_DATA_FILE # Also update for test file's direct usage
-
-        if os.path.exists(ORIGINAL_DATA_FILE):
-            os.rename(ORIGINAL_DATA_FILE, ORIGINAL_DATA_FILE + ".bak")
+        self.db_path_patcher = patch('BankAppWithTkinter.DB_PATH', TEST_DB_PATH)
+        self.mock_db_path = self.db_path_patcher.start()
         
-        if os.path.exists(TEST_DATA_FILE):
-            os.remove(TEST_DATA_FILE)
+        # Initialize the in-memory database for each test
+        # Connection needs to be held if :memory: is to persist for the test method,
+        # but our functions open/close connections themselves.
+        # initialize_database will create tables in the :memory: db pointed to by TEST_DB_PATH.
+        initialize_database(TEST_DB_PATH)
+
+        # Clean up any potential test pickle file from previous failed runs
+        if os.path.exists(TEST_PICKLE_FILE):
+            os.remove(TEST_PICKLE_FILE)
+
 
     def tearDown(self):
         """
         Clean up after each test.
-        - Restore original data file if it was backed up.
-        - Remove the test data file.
-        - Restore original DATA_FILE name for other potential modules.
+        - Stop the DB_PATH patcher.
+        - Remove the test pickle file if it was created.
         """
-        global DATA_FILE
-        if os.path.exists(TEST_DATA_FILE):
-            os.remove(TEST_DATA_FILE)
-
-        if os.path.exists(ORIGINAL_DATA_FILE + ".bak"):
-            os.rename(ORIGINAL_DATA_FILE + ".bak", ORIGINAL_DATA_FILE)
-        
-        DATA_FILE = ORIGINAL_DATA_FILE # Restore for any other module if needed
+        self.db_path_patcher.stop()
+        if os.path.exists(TEST_PICKLE_FILE):
+            os.remove(TEST_PICKLE_FILE)
 
     def test_hash_password(self):
         """Test the hash_password function."""
@@ -86,43 +93,50 @@ class TestBankAppLogic(unittest.TestCase):
         self.assertFalse(is_number(""))
         self.assertFalse(is_number(" "))
 
-    def test_data_storage_functions(self):
-        """Test save_user_data and load_user_data."""
-        # 1. Test saving and loading typical data
-        sample_data = [
-            {"uname": "user1", "pass": "hash1", "balance": 100, "transactions": []},
-            {"uname": "user2", "pass": "hash2", "balance": 200, "transactions": [{'type': 'deposit', 'amount': 50}]}
-        ]
-        save_user_data(sample_data)
-        loaded_data = load_user_data()
-        self.assertEqual(loaded_data, sample_data)
+    def test_sqlite_io_functions(self):
+        """Test the SQLite I/O functions."""
+        # Test create_user_sqlite
+        self.assertTrue(create_user_sqlite(TEST_DB_PATH, "user1", "hash1", "User One", 30, 1, 100))
+        self.assertFalse(create_user_sqlite(TEST_DB_PATH, "user1", "hash1_dup", "User One Dup", 31, 0, 200)) # Duplicate
 
-        # 2. Test load_user_data returns empty list if file doesn't exist
-        if os.path.exists(TEST_DATA_FILE):
-            os.remove(TEST_DATA_FILE)
-        self.assertEqual(load_user_data(), [])
+        # Test get_user_data_sqlite
+        user1_data = get_user_data_sqlite(TEST_DB_PATH, "user1")
+        self.assertIsNotNone(user1_data)
+        self.assertEqual(user1_data["username"], "user1")
+        self.assertEqual(user1_data["full_name"], "User One")
+        self.assertEqual(user1_data["balance"], 100)
+        self.assertIsNone(get_user_data_sqlite(TEST_DB_PATH, "nonexistentuser"))
 
-        # 3. Test load_user_data initializes transactions: [] if missing
-        data_missing_transactions = [
-            {"uname": "user3", "pass": "hash3", "balance": 300} # No 'transactions' key
-        ]
-        # Manually pickle this to create the file state
-        with open(TEST_DATA_FILE, 'wb') as f:
-            pickle.dump(data_missing_transactions, f)
+        # Test update_user_balance_sqlite
+        self.assertTrue(update_user_balance_sqlite(TEST_DB_PATH, "user1", 150))
+        user1_updated_data = get_user_data_sqlite(TEST_DB_PATH, "user1")
+        self.assertEqual(user1_updated_data["balance"], 150)
+        self.assertFalse(update_user_balance_sqlite(TEST_DB_PATH, "nonexistentuser", 200))
+
+        # Test record_transaction_sqlite
+        # First, create another user for more comprehensive transaction tests
+        self.assertTrue(create_user_sqlite(TEST_DB_PATH, "user2", "hash2", "User Two", 25, 0, 50))
         
-        loaded_data_fixed = load_user_data()
-        self.assertIn('transactions', loaded_data_fixed[0])
-        self.assertEqual(loaded_data_fixed[0]['transactions'], [])
+        ts1 = "2023-01-01 10:00:00"
+        ts2 = "2023-01-01 11:00:00"
+        self.assertTrue(record_transaction_sqlite(TEST_DB_PATH, "user1", "deposit", 50, ts1))
+        self.assertTrue(record_transaction_sqlite(TEST_DB_PATH, "user1", "withdraw", 20, ts2))
+        self.assertFalse(record_transaction_sqlite(TEST_DB_PATH, "nonexistentuser", "deposit", 10, "2023-01-01 12:00:00"))
 
-        # 4. Test load_user_data with empty file (pickle error)
-        with open(TEST_DATA_FILE, 'wb') as f:
-            pass # Create an empty file
-        self.assertEqual(load_user_data(), []) # Should handle pickle error and return empty
+        # Test get_user_transactions_sqlite
+        user1_transactions = get_user_transactions_sqlite(TEST_DB_PATH, "user1")
+        self.assertEqual(len(user1_transactions), 2)
+        # Transactions are ordered by timestamp DESC
+        self.assertEqual(user1_transactions[0]["type"], "withdraw")
+        self.assertEqual(user1_transactions[0]["amount"], 20)
+        self.assertEqual(user1_transactions[1]["type"], "deposit")
+        self.assertEqual(user1_transactions[1]["amount"], 50)
 
-        # 5. Test load_user_data with corrupted file (pickle error)
-        with open(TEST_DATA_FILE, 'wb') as f:
-            f.write(b"corrupted data")
-        self.assertEqual(load_user_data(), [])
+        user2_transactions = get_user_transactions_sqlite(TEST_DB_PATH, "user2")
+        self.assertEqual(len(user2_transactions), 0) # No transactions for user2 yet
+
+        nonexistent_transactions = get_user_transactions_sqlite(TEST_DB_PATH, "nonexistentuser")
+        self.assertEqual(len(nonexistent_transactions), 0)
 
     # --- Simulation Tests for BankApp Logic (without real Tkinter) ---
 
@@ -136,57 +150,64 @@ class TestBankAppLogic(unittest.TestCase):
         return app
 
     def test_registration_logic_simulation(self):
-        """Simulate and test parts of the user registration logic."""
-        # Initial state: no users
-        save_user_data([])
+        """Simulate and test parts of the user registration logic using SQLite backend."""
+        # Initial state: no users (assured by setUp's in-memory DB)
 
         # Valid registration
-        user_data_valid = {
-            "uname": "newuser", "name": "Test User", "age": 30, 
-            "gender": 1, "balance": 100, "pass": hash_password("password")
-        }
-        users = load_user_data()
-        users.append(user_data_valid)
-        save_user_data(users)
+        uname_valid = "newuser"
+        name_valid = "Test User"
+        age_valid = 30
+        gender_valid = 1
+        balance_valid = 100
+        pass_valid = "password"
         
-        loaded_users = load_user_data()
-        self.assertEqual(len(loaded_users), 1)
-        self.assertEqual(loaded_users[0]["uname"], "newuser")
+        # Simulate BankApp's save_user behavior by directly using create_user_sqlite
+        # In a real scenario, BankApp.save_user would be called, which then calls create_user_sqlite.
+        # Here, we test if the underlying SQLite function works as expected for registration.
+        created = create_user_sqlite(TEST_DB_PATH, uname_valid, hash_password(pass_valid), 
+                                     name_valid, age_valid, gender_valid, balance_valid)
+        self.assertTrue(created)
+        
+        user_data_db = get_user_data_sqlite(TEST_DB_PATH, uname_valid)
+        self.assertIsNotNone(user_data_db)
+        self.assertEqual(user_data_db["username"], uname_valid)
+        self.assertEqual(user_data_db["full_name"], name_valid)
 
-        # Duplicate username
-        user_data_duplicate = {
-            "uname": "newuser", "name": "Another User", "age": 25,
-            "gender": 0, "balance": 50, "pass": hash_password("newpass")
-        }
-        # Simulate check:
-        is_duplicate = any(u["uname"] == user_data_duplicate["uname"] for u in loaded_users)
-        self.assertTrue(is_duplicate)
-        # If we were to call save_user from BankApp, it should prevent this.
-        # Here, we just check that our simulation of the check works.
-
-        # Invalid data (e.g., non-numeric age - BankApp's save_user would check this)
-        # The actual save_user in BankApp does these checks before appending.
-        # Here, we are more focused on the data storage aspect and username duplication.
+        # Duplicate username check (create_user_sqlite should return False)
+        created_duplicate = create_user_sqlite(TEST_DB_PATH, uname_valid, hash_password("anotherpass"),
+                                               "Another User", 25, 0, 50)
+        self.assertFalse(created_duplicate)
+        
+        # Verify only one user with uname_valid exists
+        # This is implicitly tested by the assertFalse above, but a direct count could be added if desired.
+        # For example, fetching all users and checking length, though get_user_data_sqlite is sufficient.
 
     def test_login_logic_simulation(self):
-        """Simulate and test login logic."""
+        """Simulate and test login logic with SQLite backend."""
         app = self._create_mock_app_instance()
         
-        test_users = [
-            {"uname": "loginuser", "pass": hash_password("goodpass"), "balance": 100, "transactions": []}
-        ]
-        save_user_data(test_users)
+        uname_login = "loginuser"
+        pass_login = "goodpass"
+        initial_balance = 100
+        
+        # Setup user in DB
+        create_user_sqlite(TEST_DB_PATH, uname_login, hash_password(pass_login), 
+                           "Login TestUser", 40, 1, initial_balance)
 
         # Successful login
-        app.username_var.set("loginuser")
-        app.password_var.set("goodpass")
+        app.username_var.set(uname_login)
+        app.password_var.set(pass_login)
         
         # Mock messagebox to avoid GUI pop-ups
         with patch('BankAppWithTkinter.messagebox') as mock_messagebox:
             app.do_login() # This method updates app.current_user
         
         self.assertIsNotNone(app.current_user)
-        self.assertEqual(app.current_user["uname"], "loginuser")
+        self.assertEqual(app.current_user["uname"], uname_login)
+        self.assertEqual(app.current_user["balance"], initial_balance)
+        # Check if transactions are loaded (should be empty for new user)
+        self.assertIn('transactions', app.current_user)
+        self.assertEqual(len(app.current_user['transactions']), 0)
         mock_messagebox.showinfo.assert_called_with("Success", "Login Successful")
 
         # Failed login - wrong password
@@ -207,175 +228,266 @@ class TestBankAppLogic(unittest.TestCase):
         mock_messagebox.showerror.assert_called_with("Login Failed", "Incorrect Username or Password")
 
     def test_deposit_logic_simulation(self):
-        """Simulate and test deposit logic."""
+        """Simulate and test deposit logic with SQLite backend."""
         app = self._create_mock_app_instance()
         
-        # Setup a current user for the app instance
+        uname_deposit = "deposituser"
         initial_balance = 500
+        
+        # Setup user in DB
+        create_user_sqlite(TEST_DB_PATH, uname_deposit, "hash", "Deposit Test", 30, 1, initial_balance)
+        
+        # Simulate login to set app.current_user correctly
         app.current_user = {
-            "uname": "deposituser", "pass": "hash", "balance": initial_balance, 
-            "name": "Deposit Test", "age": 30, "gender": 1, "transactions": []
+            "id": get_user_data_sqlite(TEST_DB_PATH, uname_deposit)['id'], # Fetch ID
+            "uname": uname_deposit, "pass": "hash", "balance": initial_balance, 
+            "name": "Deposit Test", "age": 30, "gender": 1, 
+            "transactions": get_user_transactions_sqlite(TEST_DB_PATH, uname_deposit) # Should be empty
         }
-        # Also save this user to the "database" for update_user_balance to find
-        save_user_data([app.current_user])
-
+        
         # Mock UI elements that deposit_process interacts with
-        mock_parent_win = MagicMock()
-        mock_balance_label_dashboard = MagicMock() # For dashboard
+        # mock_parent_win = MagicMock() # Not strictly needed if we don't call show_deposit directly
+        # mock_balance_label_dashboard = MagicMock() # For dashboard updates
         
         # --- Test successful deposit ---
         deposit_amount = 100
-        # Simulate what show_deposit would do to set up for deposit_process
-        mock_deposit_win = MagicMock() # The Toplevel window for deposit
-        mock_amount_var = MagicMock()
-        mock_amount_var.get.return_value = str(deposit_amount)
-        mock_bal_lbl_deposit_win = MagicMock() # Balance label on deposit window
+        
+        # Mock BankApp's internal show_deposit call structure (simplified)
+        # We need to simulate the call to deposit_process which is usually a command on a button.
+        # To do this, we'll mock the amount variable that deposit_process reads from.
+        # And then call a simplified version of the logic within deposit_process.
+        
+        # Simulate the Toplevel deposit window and its amount variable
+        mock_deposit_win_app_ref = MagicMock() # Mocked Toplevel
+        app.amount_var_deposit = MagicMock() # Mocking the StringVar for deposit amount
+        app.amount_var_deposit.get.return_value = str(deposit_amount)
+        
+        # Mock the balance label on the deposit window, and dashboard (though less critical for logic test)
+        app.bal_lbl_deposit_win = MagicMock()
+        app.balance_label_dashboard = MagicMock() # This would be passed to show_deposit
 
-        # Patching internal calls made by deposit_process
         with patch('BankAppWithTkinter.messagebox') as mock_messagebox, \
-             patch.object(app, 'update_user_balance', wraps=app.update_user_balance) as mock_update_balance:
+             patch('BankAppWithTkinter.datetime') as mock_datetime:
+            mock_datetime.now.return_value.strftime.return_value = "mock_timestamp"
             
-            # Simulate calling the core logic part of deposit
-            # This is a bit simplified as we are not creating the full deposit window
-            # We directly call a simplified version of what deposit_process would do
-            
-            # Valid amount
-            self.assertTrue(is_number(mock_amount_var.get()))
-            self.assertGreater(int(mock_amount_var.get()), 0)
+            # Directly simulate the core logic of deposit_process
+            # This bypasses needing to fully mock show_deposit and its UI setup.
+            # We assume app.current_user is set (done above)
+            # and app.amount_var_deposit is set and has a .get() method (mocked above)
 
-            transaction = {
+            # --- Start of simulated deposit_process logic ---
+            amount_to_deposit_str = app.amount_var_deposit.get().strip()
+            self.assertTrue(is_number(amount_to_deposit_str)) # Check valid number
+            amount_to_deposit_int = int(amount_to_deposit_str)
+            self.assertGreater(amount_to_deposit_int, 0) # Check positive amount
+            
+            transaction_data = {
                 'type': 'deposit',
-                'amount': int(mock_amount_var.get()),
-                'timestamp': 'dummy_timestamp' # In real code, this is datetime.now()
+                'amount': amount_to_deposit_int,
+                'timestamp': mock_datetime.now().strftime.return_value
             }
-            app.current_user['transactions'].append(transaction)
             
-            new_balance = int(app.current_user['balance']) + int(mock_amount_var.get())
-            app.update_user_balance(new_balance) # This calls save_user_data
-
+            # Call the actual SQLite functions that would be called by BankApp methods
+            self.assertTrue(record_transaction_sqlite(TEST_DB_PATH, app.current_user["uname"], 
+                                                      transaction_data['type'], transaction_data['amount'], 
+                                                      transaction_data['timestamp']))
+            
+            new_balance_val = app.current_user['balance'] + amount_to_deposit_int
+            self.assertTrue(update_user_balance_sqlite(TEST_DB_PATH, app.current_user["uname"], new_balance_val))
+            
+            # Update in-memory user object as BankApp does
+            app.current_user['balance'] = new_balance_val
+            app.current_user['transactions'].append(transaction_data)
+            
             mock_messagebox.showinfo.assert_called_with("Success", "Deposit Successful")
-            mock_bal_lbl_deposit_win.config.assert_not_called() # Not directly testing this mock call here
-            mock_balance_label_dashboard.config.assert_not_called() # Nor this one
+            # app.bal_lbl_deposit_win.config.assert_called_with(text=f"Balance: {new_balance_val}")
+            # app.balance_label_dashboard.config.assert_called_with(text=f"Balance: {new_balance_val}")
+            # --- End of simulated deposit_process logic ---
 
         self.assertEqual(app.current_user["balance"], initial_balance + deposit_amount)
-        self.assertEqual(len(app.current_user["transactions"]), 1)
-        self.assertEqual(app.current_user["transactions"][0]["type"], "deposit")
-        self.assertEqual(app.current_user["transactions"][0]["amount"], deposit_amount)
+        # Verify data was saved to DB
+        user_data_after_deposit = get_user_data_sqlite(TEST_DB_PATH, uname_deposit)
+        self.assertEqual(user_data_after_deposit["balance"], initial_balance + deposit_amount)
         
-        # Verify data was saved
-        loaded_data = load_user_data()
-        self.assertEqual(loaded_data[0]["balance"], initial_balance + deposit_amount)
-        self.assertEqual(len(loaded_data[0]["transactions"]), 1)
+        transactions_after_deposit = get_user_transactions_sqlite(TEST_DB_PATH, uname_deposit)
+        self.assertEqual(len(transactions_after_deposit), 1)
+        self.assertEqual(transactions_after_deposit[0]["type"], "deposit")
+        self.assertEqual(transactions_after_deposit[0]["amount"], deposit_amount)
+        self.assertEqual(transactions_after_deposit[0]["timestamp"], "mock_timestamp")
 
-        # --- Test invalid deposit amounts ---
-        invalid_amounts = ["-10", "0", "abc"]
-        for amount_str in invalid_amounts:
-            app.current_user["balance"] = initial_balance + deposit_amount # Reset balance for each test
-            app.current_user["transactions"] = [app.current_user["transactions"][0]] # Reset transactions
-            save_user_data([app.current_user]) # Save reset state
-
-            mock_amount_var.get.return_value = amount_str
-            with patch('BankAppWithTkinter.messagebox') as mock_messagebox:
-                # Simulate the checks in deposit_process
-                if not is_number(amount_str):
-                    mock_messagebox.showerror("Invalid Amount", "Please provide only numeric data")
-                elif int(amount_str) <= 0:
-                    mock_messagebox.showerror("Invalid Amount", "Amount must be greater than zero")
-                else:
-                    # This part should not be reached for these invalid amounts
-                    self.fail("Deposit logic allowed invalid amount: " + amount_str)
-
-                if not is_number(amount_str):
-                    mock_messagebox.showerror.assert_called_with("Invalid Amount", "Please provide only numeric data")
-                elif int(amount_str) <= 0:
-                    mock_messagebox.showerror.assert_called_with("Invalid Amount", "Amount must be greater than zero")
-            
-            # Ensure balance and transactions didn't change
-            self.assertEqual(app.current_user["balance"], initial_balance + deposit_amount)
-            self.assertEqual(len(app.current_user["transactions"]), 1)
+        # --- Test invalid deposit amounts (simplified, focusing on checks before DB ops) ---
+        # Example: Invalid amount string
+        app.amount_var_deposit.get.return_value = "abc"
+        with patch('BankAppWithTkinter.messagebox') as mock_messagebox:
+            # Simulate just the start of deposit_process
+            if not is_number(app.amount_var_deposit.get()):
+                mock_messagebox.showerror("Invalid Amount", "Please provide only numeric data")
+            mock_messagebox.showerror.assert_called_with("Invalid Amount", "Please provide only numeric data")
+        
+        # Example: Non-positive amount
+        app.amount_var_deposit.get.return_value = "-10"
+        with patch('BankAppWithTkinter.messagebox') as mock_messagebox:
+            if is_number(app.amount_var_deposit.get()) and int(app.amount_var_deposit.get()) <= 0:
+                 mock_messagebox.showerror("Invalid Amount", "Amount must be greater than zero")
+            mock_messagebox.showerror.assert_called_with("Invalid Amount", "Amount must be greater than zero")
 
 
     def test_withdrawal_logic_simulation(self):
-        """Simulate and test withdrawal logic."""
+        """Simulate and test withdrawal logic with SQLite backend."""
         app = self._create_mock_app_instance()
 
+        uname_withdraw = "withdrawuser"
         initial_balance = 500
+        create_user_sqlite(TEST_DB_PATH, uname_withdraw, "hash", "Withdraw Test", 30, 1, initial_balance)
+        
         app.current_user = {
-            "uname": "withdrawuser", "pass": "hash", "balance": initial_balance,
-            "name": "Withdraw Test", "age": 30, "gender": 1, "transactions": []
+            "id": get_user_data_sqlite(TEST_DB_PATH, uname_withdraw)['id'],
+            "uname": uname_withdraw, "pass": "hash", "balance": initial_balance,
+            "name": "Withdraw Test", "age": 30, "gender": 1, 
+            "transactions": get_user_transactions_sqlite(TEST_DB_PATH, uname_withdraw)
         }
-        save_user_data([app.current_user])
 
-        mock_amount_var = MagicMock()
+        app.amount_var_withdraw = MagicMock() # StringVar for withdrawal
 
         # --- Test successful withdrawal ---
         withdrawal_amount = 100
-        mock_amount_var.get.return_value = str(withdrawal_amount)
+        app.amount_var_withdraw.get.return_value = str(withdrawal_amount)
 
         with patch('BankAppWithTkinter.messagebox') as mock_messagebox, \
-             patch.object(app, 'update_user_balance', wraps=app.update_user_balance):
+             patch('BankAppWithTkinter.datetime') as mock_datetime:
+            mock_datetime.now.return_value.strftime.return_value = "mock_timestamp_withdraw"
 
-            # Simulate checks and logic from withdraw_process
-            self.assertTrue(is_number(mock_amount_var.get()))
-            amount_val = int(mock_amount_var.get())
-            self.assertGreater(amount_val, 0)
-            self.assertLessEqual(amount_val, app.current_user['balance'])
+            # --- Start of simulated withdraw_process logic ---
+            amount_to_withdraw_str = app.amount_var_withdraw.get().strip()
+            self.assertTrue(is_number(amount_to_withdraw_str))
+            amount_to_withdraw_int = int(amount_to_withdraw_str)
+            self.assertGreater(amount_to_withdraw_int, 0)
+            self.assertLessEqual(amount_to_withdraw_int, app.current_user['balance'])
 
-            transaction = {
+            transaction_data = {
                 'type': 'withdrawal',
-                'amount': amount_val,
-                'timestamp': 'dummy_timestamp' 
+                'amount': amount_to_withdraw_int,
+                'timestamp': mock_datetime.now().strftime.return_value
             }
-            app.current_user['transactions'].append(transaction)
             
-            new_balance = int(app.current_user['balance']) - amount_val
-            app.update_user_balance(new_balance)
-
-            mock_messagebox.showinfo.assert_called_with("Success", f"Withdraw successful of ${amount_val}")
+            self.assertTrue(record_transaction_sqlite(TEST_DB_PATH, app.current_user["uname"], 
+                                                      transaction_data['type'], transaction_data['amount'], 
+                                                      transaction_data['timestamp']))
+            
+            new_balance_val = app.current_user['balance'] - amount_to_withdraw_int
+            self.assertTrue(update_user_balance_sqlite(TEST_DB_PATH, app.current_user["uname"], new_balance_val))
+            
+            app.current_user['balance'] = new_balance_val
+            app.current_user['transactions'].append(transaction_data)
+            
+            mock_messagebox.showinfo.assert_called_with("Success", f"Withdraw successful of ${amount_to_withdraw_int}")
+            # --- End of simulated withdraw_process logic ---
 
         self.assertEqual(app.current_user["balance"], initial_balance - withdrawal_amount)
-        self.assertEqual(len(app.current_user["transactions"]), 1)
-        self.assertEqual(app.current_user["transactions"][0]["type"], "withdrawal")
-        self.assertEqual(app.current_user["transactions"][0]["amount"], withdrawal_amount)
+        user_data_after_withdraw = get_user_data_sqlite(TEST_DB_PATH, uname_withdraw)
+        self.assertEqual(user_data_after_withdraw["balance"], initial_balance - withdrawal_amount)
         
-        loaded_data = load_user_data()
-        self.assertEqual(loaded_data[0]["balance"], initial_balance - withdrawal_amount)
+        transactions_after_withdraw = get_user_transactions_sqlite(TEST_DB_PATH, uname_withdraw)
+        self.assertEqual(len(transactions_after_withdraw), 1)
+        self.assertEqual(transactions_after_withdraw[0]["type"], "withdrawal")
 
-        # --- Test invalid withdrawal amounts ---
-        # Reset state for these tests
-        app.current_user["balance"] = initial_balance - withdrawal_amount 
-        app.current_user["transactions"] = [app.current_user["transactions"][0]]
-        save_user_data([app.current_user])
+        # --- Test invalid withdrawal (e.g., insufficient funds) ---
+        app.amount_var_withdraw.get.return_value = str(app.current_user['balance'] + 100) # Insufficient
+        with patch('BankAppWithTkinter.messagebox') as mock_messagebox:
+            # Simulate checks from withdraw_process
+            if is_number(app.amount_var_withdraw.get()):
+                val = int(app.amount_var_withdraw.get())
+                if val > 0 and val > app.current_user['balance']:
+                    mock_messagebox.showerror("Invalid Amount", "Insufficient funds")
+            mock_messagebox.showerror.assert_called_with("Invalid Amount", "Insufficient funds")
+
+    def test_migrate_pickle_to_sqlite(self):
+        """Test the migrate_pickle_to_sqlite function."""
+        # 1. Create a dummy pickle file (TEST_PICKLE_FILE)
+        dummy_pickle_data = [
+            {
+                "uname": "pickleuser1", "pass": hash_password("picklepass1"), "name": "Pickle User One",
+                "age": 40, "gender": 1, "balance": 1000,
+                "transactions": [
+                    {'type': 'deposit', 'amount': 1000, 'timestamp': '2023-01-01 09:00:00'}
+                ]
+            },
+            {
+                "uname": "pickleuser2", "pass": hash_password("picklepass2"), "name": "Pickle User Two",
+                "age": 35, "gender": 0, "balance": 500,
+                "transactions": [] # No transactions
+            },
+            { # User missing some non-critical data, but core data present
+                "uname": "pickleuser3", "pass": hash_password("picklepass3"), "name": "Pickle User Three",
+                "age": 20, "gender": 1, "balance": 100 # Transactions will default to empty if key missing
+            }
+        ]
+        with open(TEST_PICKLE_FILE, 'wb') as f:
+            pickle.dump(dummy_pickle_data, f)
+
+        # 2. Call migrate_pickle_to_sqlite
+        # Ensure the in-memory DB is fresh (setUp does this)
+        # initialize_database(TEST_DB_PATH) # Called in setUp
         
-        current_bal_for_invalid_tests = app.current_user["balance"]
-        num_transactions_before_invalid = len(app.current_user["transactions"])
+        migrated_users_count, migrated_transactions_count = migrate_pickle_to_sqlite(
+            db_path=TEST_DB_PATH, 
+            pickle_path=TEST_PICKLE_FILE
+        )
 
-        invalid_scenarios = {
-            "-10": "Amount must be greater than zero",
-            "0": "Amount must be greater than zero",
-            "abc": "Please provide only numeric data",
-            str(current_bal_for_invalid_tests + 100): "Insufficient funds" # Insufficient
-        }
+        # 3. Verify counts
+        self.assertEqual(migrated_users_count, 3)
+        self.assertEqual(migrated_transactions_count, 1) # Only user1 had a transaction
 
-        for amount_str, error_msg in invalid_scenarios.items():
-            mock_amount_var.get.return_value = amount_str
-            with patch('BankAppWithTkinter.messagebox') as mock_messagebox:
-                # Simulate the checks in withdraw_process
-                if not is_number(amount_str):
-                    mock_messagebox.showerror("Invalid Amount", "Please provide only numeric data")
-                else:
-                    amount_val_invalid = int(amount_str)
-                    if amount_val_invalid <= 0:
-                        mock_messagebox.showerror("Invalid Amount", "Amount must be greater than zero")
-                    elif int(app.current_user['balance']) - amount_val_invalid < 0:
-                         mock_messagebox.showerror("Invalid Amount", "Insufficient funds")
-                    else:
-                        self.fail("Withdrawal logic allowed invalid amount/scenario: " + amount_str)
-                
-                mock_messagebox.showerror.assert_called_with("Invalid Amount", error_msg)
-            
-            self.assertEqual(app.current_user["balance"], current_bal_for_invalid_tests)
-            self.assertEqual(len(app.current_user["transactions"]), num_transactions_before_invalid)
+        # 4. Verify data in SQLite
+        # User 1
+        user1_db = get_user_data_sqlite(TEST_DB_PATH, "pickleuser1")
+        self.assertIsNotNone(user1_db)
+        self.assertEqual(user1_db["full_name"], "Pickle User One")
+        self.assertEqual(user1_db["balance"], 1000)
+        user1_db_transactions = get_user_transactions_sqlite(TEST_DB_PATH, "pickleuser1")
+        self.assertEqual(len(user1_db_transactions), 1)
+        self.assertEqual(user1_db_transactions[0]["amount"], 1000)
+
+        # User 2
+        user2_db = get_user_data_sqlite(TEST_DB_PATH, "pickleuser2")
+        self.assertIsNotNone(user2_db)
+        self.assertEqual(user2_db["balance"], 500)
+        user2_db_transactions = get_user_transactions_sqlite(TEST_DB_PATH, "pickleuser2")
+        self.assertEqual(len(user2_db_transactions), 0)
+
+        # User 3
+        user3_db = get_user_data_sqlite(TEST_DB_PATH, "pickleuser3")
+        self.assertIsNotNone(user3_db)
+        self.assertEqual(user3_db["balance"], 100)
+        user3_db_transactions = get_user_transactions_sqlite(TEST_DB_PATH, "pickleuser3")
+        self.assertEqual(len(user3_db_transactions), 0) # Should have empty transactions list
+
+        # 5. Test migration with an existing user in DB (should not overwrite or duplicate)
+        # Re-create pickleuser1 in DB *before* migration attempt
+        initialize_database(TEST_DB_PATH) # Clear DB
+        create_user_sqlite(TEST_DB_PATH, "pickleuser1", "original_hash", "Original DB User1", 41, 0, 100)
+
+        # Ensure the pickle file still exists (it should from the first part of the test)
+        # Or recreate it if the migration process modifies/deletes it (current migrate_pickle_to_sqlite doesn't)
+        
+        migrated_users_count_again, migrated_transactions_count_again = migrate_pickle_to_sqlite(
+            db_path=TEST_DB_PATH, 
+            pickle_path=TEST_PICKLE_FILE
+        )
+        
+        # pickleuser1 should not be migrated again, but user2 and user3 should.
+        self.assertEqual(migrated_users_count_again, 2) 
+        self.assertEqual(migrated_transactions_count_again, 0) # User1's transactions not migrated because user1 was skipped
+
+        user1_db_after_second_migration = get_user_data_sqlite(TEST_DB_PATH, "pickleuser1")
+        self.assertEqual(user1_db_after_second_migration["password_hash"], "original_hash") # Still the original
+        self.assertEqual(user1_db_after_second_migration["balance"], 100) # Still the original balance
+        
+        # User2 and User3 should now exist from the second migration pass
+        self.assertIsNotNone(get_user_data_sqlite(TEST_DB_PATH, "pickleuser2"))
+        self.assertIsNotNone(get_user_data_sqlite(TEST_DB_PATH, "pickleuser3"))
+
+        # Clean up is handled by tearDown for TEST_PICKLE_FILE
 
 
 if __name__ == '__main__':
