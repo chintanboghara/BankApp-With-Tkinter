@@ -31,6 +31,8 @@ This is a simple bank application built using Python's Tkinter library for the g
 - **Login Rate Limiting:**  
   To protect against brute-force attacks, user accounts are temporarily locked (default: 2 minutes) after a set number of consecutive failed login attempts (default: 5 attempts). This is tracked per username.
 
+- **Session Timeout:** For enhanced security, users are automatically logged out after a period of inactivity (default: 1 minute for current testing, intended for 5-15 minutes in a production setting). Activity is tracked by interactions with the application windows.
+
 ## Installation
 
 1. **Python 3.x:**  
