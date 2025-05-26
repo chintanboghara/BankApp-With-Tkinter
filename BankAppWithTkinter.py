@@ -5,26 +5,55 @@ import logging
 import hashlib
 import sqlite3
 from datetime import datetime
+from pathlib import Path # Added
 from tkinter import *
 from tkinter import ttk, messagebox
+from logging.handlers import RotatingFileHandler
 
 # Configure logging to record events in a log file
-logging.basicConfig(
-    filename='bankapp.log',
-    level=logging.INFO,
-    format='%(asctime)s:%(levelname)s:%(message)s'
-)
+# Get the root logger
+logger = logging.getLogger()
+logger.setLevel(logging.INFO) # Set the root logger level
+
+# Define the log file path (can keep it as 'bankapp.log')
+log_file = 'bankapp.log'
+
+# Create a RotatingFileHandler
+# Rotate after 1MB, keep 3 backup logs
+rotate_handler = RotatingFileHandler(log_file, maxBytes=1024*1024, backupCount=3, encoding='utf-8')
+
+# Create a formatter and set it for the handler
+formatter = logging.Formatter('%(asctime)s:%(levelname)s:%(message)s')
+rotate_handler.setFormatter(formatter)
+
+# Add the handler to the logger
+logger.addHandler(rotate_handler)
+
+# Optional: If you also want to see logs on the console during development (remove for production packaging)
+# console_handler = logging.StreamHandler()
+# console_handler.setFormatter(formatter)
+# logger.addHandler(console_handler)
+
 
 # DATA_FILE = 'appData.bin' # Removed as data is now handled by SQLite
-DB_PATH = 'bankapp.db'
+# DB_PATH = 'bankapp.db' # Old DB_PATH definition
+
+APP_NAME = "BankApp" # Can be a global constant
+home_dir = Path.home()
+app_data_dir = home_dir / f".{APP_NAME}" # e.g., ~/.BankApp or C:\Users\<user>\.BankApp
+DB_PATH = app_data_dir / "bankapp.db"
 
 
-def initialize_database(db_path: str = DB_PATH) -> None:
+def initialize_database(db_path: Path = DB_PATH) -> None:
     """
-    Connects to or creates the SQLite database file.
+    Connects to or creates the SQLite database file in the user-specific directory.
     Creates 'users' and 'transactions' tables if they don't exist.
+    Ensures the database directory exists.
     """
     try:
+        # Ensure the parent directory for the database exists
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        
         with sqlite3.connect(db_path) as conn:
             cursor = conn.cursor()
             # Create users table
