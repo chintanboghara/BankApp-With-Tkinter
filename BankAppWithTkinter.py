@@ -3,6 +3,7 @@ import pickle
 import re
 import logging
 import hashlib
+import sqlite3
 from datetime import datetime
 from tkinter import *
 from tkinter import ttk, messagebox
@@ -14,7 +15,164 @@ logging.basicConfig(
     format='%(asctime)s:%(levelname)s:%(message)s'
 )
 
-DATA_FILE = 'appData.bin'
+# DATA_FILE = 'appData.bin' # Removed as data is now handled by SQLite
+DB_PATH = 'bankapp.db'
+
+
+def initialize_database(db_path: str = DB_PATH) -> None:
+    """
+    Connects to or creates the SQLite database file.
+    Creates 'users' and 'transactions' tables if they don't exist.
+    """
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            # Create users table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    full_name TEXT NOT NULL,
+                    age INTEGER NOT NULL,
+                    gender INTEGER NOT NULL,
+                    balance INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+            # Create transactions table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS transactions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    type TEXT NOT NULL,
+                    amount INTEGER NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id)
+                )
+            """)
+            conn.commit()
+            logging.info("Database initialized successfully at %s", db_path)
+    except sqlite3.Error as e:
+        logging.error("Error initializing database at %s: %s", db_path, e)
+
+
+def create_user_sqlite(db_path: str, username: str, password_hash: str, full_name: str, age: int, gender: int, initial_balance: int) -> bool:
+    """
+    Inserts a new user into the users table.
+    Returns True on success, False on failure (e.g., username exists).
+    """
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO users (username, password_hash, full_name, age, gender, balance)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (username, password_hash, full_name, age, gender, initial_balance))
+            conn.commit()
+            logging.info("User '%s' created successfully in SQLite.", username)
+            return True
+    except sqlite3.IntegrityError:
+        logging.warning("Failed to create user '%s' in SQLite: Username already exists.", username)
+        return False
+    except sqlite3.Error as e:
+        logging.error("Error creating user '%s' in SQLite: %s", username, e)
+        return False
+
+
+def get_user_data_sqlite(db_path: str, username: str) -> dict | None:
+    """
+    Fetches user data from the users table by username.
+    Returns a dictionary of user data or None if not found.
+    """
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row  # Access columns by name
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
+            row = cursor.fetchone()
+            if row:
+                logging.info("User data for '%s' retrieved successfully from SQLite.", username)
+                return dict(row)
+            else:
+                logging.info("No user data found for '%s' in SQLite.", username)
+                return None
+    except sqlite3.Error as e:
+        logging.error("Error fetching user data for '%s' from SQLite: %s", username, e)
+        return None
+
+
+def update_user_balance_sqlite(db_path: str, username: str, new_balance: int) -> bool:
+    """
+    Updates the balance for the specified username in the users table.
+    Returns True on success, False on failure.
+    """
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET balance = ? WHERE username = ?", (new_balance, username))
+            conn.commit()
+            if cursor.rowcount > 0:
+                logging.info("Balance updated for user '%s' to %d in SQLite.", username, new_balance)
+                return True
+            else:
+                logging.warning("Failed to update balance for user '%s' in SQLite: User not found.", username)
+                return False
+    except sqlite3.Error as e:
+        logging.error("Error updating balance for user '%s' in SQLite: %s", username, e)
+        return False
+
+
+def record_transaction_sqlite(db_path: str, username: str, transaction_type: str, amount: int, timestamp: str) -> bool:
+    """
+    Records a new transaction for the user.
+    Returns True on success, False on failure.
+    """
+    user_data = get_user_data_sqlite(db_path, username)
+    if not user_data:
+        logging.warning("Failed to record transaction for '%s': User not found.", username)
+        return False
+    
+    user_id = user_data['id']
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO transactions (user_id, type, amount, timestamp)
+                VALUES (?, ?, ?, ?)
+            """, (user_id, transaction_type, amount, timestamp))
+            conn.commit()
+            logging.info("Transaction recorded for user '%s' (ID: %d): %s, Amount: %d", username, user_id, transaction_type, amount)
+            return True
+    except sqlite3.Error as e:
+        logging.error("Error recording transaction for user '%s' (ID: %d): %s", username, user_id, e)
+        return False
+
+
+def get_user_transactions_sqlite(db_path: str, username: str) -> list:
+    """
+    Fetches all transactions for a user, ordered by timestamp descending.
+    Returns a list of transaction dictionaries or an empty list.
+    """
+    user_data = get_user_data_sqlite(db_path, username)
+    if not user_data:
+        logging.info("No transactions found for '%s': User not found.", username)
+        return []
+
+    user_id = user_data['id']
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT type, amount, timestamp FROM transactions
+                WHERE user_id = ? ORDER BY timestamp DESC
+            """, (user_id,))
+            transactions = [dict(row) for row in cursor.fetchall()]
+            logging.info("Retrieved %d transactions for user '%s' (ID: %d) from SQLite.", len(transactions), username, user_id)
+            return transactions
+    except sqlite3.Error as e:
+        logging.error("Error fetching transactions for user '%s' (ID: %d) from SQLite: %s", username, user_id, e)
+        return []
 
 
 def is_number(s: str) -> bool:
@@ -47,43 +205,127 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
 
-def load_user_data() -> list:
+def load_user_data_pickle(pickle_path: str = "appData.bin") -> list:
     """
-    Load user data from a binary file. Returns an empty list if the file does not exist or if an error occurs.
-    
-    Returns:
-        list: A list of user dictionaries.
+    Load user data from a binary pickle file.
+    Ensures each user has a 'transactions' key.
+    Returns an empty list if the file does not exist or if an error occurs.
     """
-    if not os.path.exists(DATA_FILE):
-        logging.info("Data file does not exist. Returning empty list.")
+    if not os.path.exists(pickle_path):
+        logging.info("Pickle data file (%s) does not exist. Returning empty list.", pickle_path)
         return []
     try:
-        with open(DATA_FILE, 'rb') as f:
+        with open(pickle_path, 'rb') as f:
             data = pickle.load(f)
-            # Ensure each user has a 'transactions' key
+            # Ensure each user has a 'transactions' key for compatibility
             for user in data:
                 if 'transactions' not in user:
                     user['transactions'] = []
-            logging.info("User data loaded successfully.")
+            logging.info("User data loaded successfully from pickle file: %s", pickle_path)
             return data
-    except Exception as e:
-        logging.error("Error loading user data: %s", e)
+    except FileNotFoundError: # Should be caught by os.path.exists, but as a safeguard
+        logging.error("Pickle file %s not found during load attempt.", pickle_path)
+        return []
+    except pickle.UnpicklingError as e:
+        logging.error("Error unpickling data from %s: %s", pickle_path, e)
+        return []
+    except Exception as e: # Catch any other unexpected errors during loading
+        logging.error("Unexpected error loading user data from pickle file %s: %s", pickle_path, e)
         return []
 
 
-def save_user_data(data: list) -> None:
-    """
-    Save user data list to a binary file.
+# def load_user_data() -> list: # Removed - Using SQLite
+#     """
+#     Load user data from a binary file. Returns an empty list if the file does not exist or if an error occurs.
     
-    Args:
-        data (list): The user data list to save.
+#     Returns:
+#         list: A list of user dictionaries.
+#     """
+#     if not os.path.exists(DATA_FILE):
+#         logging.info("Data file does not exist. Returning empty list.")
+#         return []
+#     try:
+#         with open(DATA_FILE, 'rb') as f:
+#             data = pickle.load(f)
+#             # Ensure each user has a 'transactions' key
+#             for user in data:
+#                 if 'transactions' not in user:
+#                     user['transactions'] = []
+#             logging.info("User data loaded successfully.")
+#             return data
+#     except Exception as e:
+#         logging.error("Error loading user data: %s", e)
+#         return []
+
+
+# def save_user_data(data: list) -> None: # Removed - Using SQLite
+#     """
+#     Save user data list to a binary file.
+    
+#     Args:
+#         data (list): The user data list to save.
+#     """
+#     try:
+#         with open(DATA_FILE, 'wb') as f:
+#             pickle.dump(data, f)
+#             logging.info("User data saved successfully.")
+#     except Exception as e:
+#         logging.error("Error saving user data: %s", e)
+
+
+def migrate_pickle_to_sqlite(db_path: str = DB_PATH, pickle_path: str = "appData.bin") -> tuple[int, int]:
     """
-    try:
-        with open(DATA_FILE, 'wb') as f:
-            pickle.dump(data, f)
-            logging.info("User data saved successfully.")
-    except Exception as e:
-        logging.error("Error saving user data: %s", e)
+    Migrates user data from a pickle file to an SQLite database.
+    Returns a tuple of (migrated_users_count, migrated_transactions_count).
+    """
+    logging.info("Starting migration from pickle file '%s' to SQLite DB '%s'", pickle_path, db_path)
+    
+    users_data = load_user_data_pickle(pickle_path)
+    if not users_data:
+        logging.info("No data found in pickle file '%s'. Migration terminated.", pickle_path)
+        return 0, 0
+
+    migrated_users_count = 0
+    migrated_transactions_count = 0
+
+    for user in users_data:
+        try:
+            uname = user.get("uname")
+            pass_hash = user.get("pass") # Already hashed in pickle file
+            name = user.get("name")
+            age = user.get("age")
+            gender = user.get("gender")
+            balance = user.get("balance", 0) # Default balance to 0 if not present
+            transactions = user.get("transactions", [])
+
+            if not all([uname, pass_hash, name, age is not None, gender is not None]):
+                logging.warning("Skipping user due to missing core data: %s", uname or "Unknown user")
+                continue
+            
+            if create_user_sqlite(db_path, uname, pass_hash, name, int(age), int(gender), int(balance)):
+                migrated_users_count += 1
+                logging.info("User '%s' migrated successfully to SQLite.", uname)
+                
+                for tx in transactions:
+                    tx_type = tx.get('type')
+                    tx_amount = tx.get('amount')
+                    tx_timestamp = tx.get('timestamp')
+                    if not all([tx_type, tx_amount is not None, tx_timestamp]):
+                        logging.warning("Skipping transaction for user '%s' due to missing transaction data: %s", uname, tx)
+                        continue
+                    
+                    if record_transaction_sqlite(db_path, uname, tx_type, int(tx_amount), tx_timestamp):
+                        migrated_transactions_count += 1
+                    else:
+                        logging.warning("Failed to migrate a transaction for user '%s'. Details: %s", uname, tx)
+            else:
+                logging.warning("User '%s' already exists in SQLite or could not be created. Skipping migration for this user.", uname)
+        except Exception as e:
+            logging.error("An unexpected error occurred during migration for user '%s': %s", user.get("uname", "Unknown"), e)
+            # Decide if you want to continue with the next user or stop. For now, continuing.
+
+    logging.info("Migration completed. Migrated %d users and %d transactions.", migrated_users_count, migrated_transactions_count)
+    return migrated_users_count, migrated_transactions_count
 
 
 class BankApp:
@@ -204,16 +446,26 @@ class BankApp:
         password = self.password_var.get().strip()
         hashed_input = hash_password(password)
 
-        users = load_user_data()
-        for user in users:
-            if user["uname"] == username and user["pass"] == hashed_input:
-                self.current_user = user
-                messagebox.showinfo("Success", "Login Successful")
-                logging.info("User '%s' logged in successfully.", username)
-                self.show_dashboard()
-                return
-        messagebox.showerror("Login Failed", "Incorrect Username or Password")
-        logging.warning("Failed login attempt for username: %s", username)
+        user_data = get_user_data_sqlite(DB_PATH, username)
+        if user_data and user_data["password_hash"] == hashed_input:
+            # Convert column names to match existing app's expectations if necessary
+            # For example, 'username' -> 'uname', 'full_name' -> 'name', 'password_hash' -> 'pass'
+            self.current_user = {
+                'id': user_data['id'],
+                'uname': user_data['username'],
+                'pass': user_data['password_hash'],
+                'name': user_data['full_name'],
+                'age': user_data['age'],
+                'gender': user_data['gender'],
+                'balance': user_data['balance'],
+                'transactions': get_user_transactions_sqlite(DB_PATH, username) # Fetch transactions on login
+            }
+            messagebox.showinfo("Success", "Login Successful")
+            logging.info("User '%s' logged in successfully.", username)
+            self.show_dashboard()
+        else:
+            messagebox.showerror("Login Failed", "Incorrect Username or Password")
+            logging.warning("Failed login attempt for username: %s", username)
 
     def create_register_screen(self) -> None:
         """Display the registration window."""
@@ -266,28 +518,21 @@ class BankApp:
 
             balance = int(float(balance_str))
             
-            users = load_user_data() # Load existing users to check for duplicates
-            for user_check in users: 
-                if user_check["uname"] == uname:
-                    messagebox.showerror("Invalid Username", "User already exists.")
-                    return
+            hashed_password = hash_password(passwd)
 
             # Confirmation Dialog for Registration
             if messagebox.askyesno("Confirm Registration", "Are you sure you want to register with these details?"):
-                new_user = {
-                    "uname": uname,
-                    "name": full_name,
-                    "age": age,
-                    "gender": gender,
-                    "balance": balance,
-                    "pass": hash_password(passwd),
-                    "transactions": [] # Ensure new users have transactions list
-                }
-                users.append(new_user)
-                save_user_data(users)
-                messagebox.showinfo("Success", "User Registered Successfully")
-                logging.info("New user registered: %s", uname)
-                back_to_login()
+                if create_user_sqlite(DB_PATH, uname, hashed_password, full_name, age, gender, balance):
+                    messagebox.showinfo("Success", "User Registered Successfully")
+                    logging.info("New user registered: %s", uname)
+                    # Optionally pre-fetch transactions or handle as part of login
+                    # For now, new users have no transactions, so an empty list is fine.
+                    # self.current_user['transactions'] = [] 
+                    back_to_login()
+                else:
+                    # Error message for username exists is handled by create_user_sqlite logging,
+                    # but a user-facing message is also good.
+                    messagebox.showerror("Registration Failed", "Username may already exist or another error occurred.")
             # If user clicks "No", they remain on the registration screen with data intact.
 
         Label(register_window, text="Sign Up", font=("Arial", 40), bg="white").pack(pady=20)
@@ -356,14 +601,14 @@ class BankApp:
         Args:
             new_balance (int): The new balance value.
         """
-        users = load_user_data()
-        for user in users:
-            if user["uname"] == self.current_user["uname"]:
-                user["balance"] = new_balance
-                self.current_user["balance"] = new_balance
-                break
-        save_user_data(users)
-        logging.info("User '%s' balance updated to %d", self.current_user["uname"], new_balance)
+        if update_user_balance_sqlite(DB_PATH, self.current_user["uname"], new_balance):
+            self.current_user["balance"] = new_balance # Update current_user in memory
+            logging.info("User '%s' balance updated to %d in app and SQLite.", self.current_user["uname"], new_balance)
+        else:
+            # This case should ideally not happen if username is validated, but good for robustness
+            logging.error("Failed to update balance for user '%s' in SQLite from update_user_balance.", self.current_user["uname"])
+            messagebox.showerror("Error", "Failed to update balance in the database.")
+
 
     def show_deposit(self, parent: Toplevel, balance_label: Label) -> None:
         """Display the deposit window."""
@@ -396,13 +641,24 @@ class BankApp:
                 'amount': int(amount),
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
-            self.current_user['transactions'].append(transaction)
-            
-            new_balance = int(self.current_user['balance']) + int(amount)
-            self.update_user_balance(new_balance)
-            messagebox.showinfo("Success", "Deposit Successful")
-            bal_lbl.config(text=f"Balance: {new_balance}")
-            balance_label.config(text=f"Balance: {new_balance}")
+            # Record transaction in SQLite first
+            if record_transaction_sqlite(DB_PATH, self.current_user["uname"], transaction['type'], transaction['amount'], transaction['timestamp']):
+                # Update balance in SQLite and in-memory current_user object
+                new_balance = int(self.current_user['balance']) + int(amount)
+                self.update_user_balance(new_balance) # This now updates SQLite and self.current_user
+
+                # Update UI
+                messagebox.showinfo("Success", "Deposit Successful")
+                bal_lbl.config(text=f"Balance: {new_balance}")
+                balance_label.config(text=f"Balance: {new_balance}")
+                
+                # Update in-memory transaction list for the current session
+                self.current_user['transactions'].append(transaction)
+                logging.info("Deposit transaction processed and recorded for %s.", self.current_user["uname"])
+            else:
+                messagebox.showerror("Deposit Failed", "Could not record the transaction in the database.")
+                logging.error("Failed to record deposit transaction for %s in SQLite.", self.current_user["uname"])
+
 
         ttk.Button(deposit_win, text="Deposit", command=deposit_process, style="Accent.TButton").pack(pady=10)
         ttk.Button(deposit_win, text="Back", command=deposit_win.destroy).pack(side="right", padx=20, pady=20)
@@ -450,13 +706,24 @@ class BankApp:
                 'amount': int(amount),
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
-            self.current_user['transactions'].append(transaction)
+            
+            # Record transaction in SQLite first
+            if record_transaction_sqlite(DB_PATH, self.current_user["uname"], transaction['type'], transaction['amount'], transaction['timestamp']):
+                # Update balance in SQLite and in-memory current_user object
+                new_balance = int(self.current_user['balance']) - int(amount)
+                self.update_user_balance(new_balance) # This now updates SQLite and self.current_user
 
-            new_balance = int(self.current_user['balance']) - int(amount)
-            self.update_user_balance(new_balance)
-            messagebox.showinfo("Success", f"Withdraw successful of ${amount}")
-            bal_lbl.config(text=f"Balance: {new_balance}")
-            balance_label.config(text=f"Balance: {new_balance}")
+                # Update UI
+                messagebox.showinfo("Success", f"Withdraw successful of ${amount}")
+                bal_lbl.config(text=f"Balance: {new_balance}")
+                balance_label.config(text=f"Balance: {new_balance}")
+
+                # Update in-memory transaction list for the current session
+                self.current_user['transactions'].append(transaction)
+                logging.info("Withdrawal transaction processed and recorded for %s.", self.current_user["uname"])
+            else:
+                messagebox.showerror("Withdrawal Failed", "Could not record the transaction in the database.")
+                logging.error("Failed to record withdrawal transaction for %s in SQLite.", self.current_user["uname"])
 
         ttk.Button(withdraw_win, text="Withdraw", command=withdraw_process, style="Accent.TButton").pack(pady=10)
         ttk.Button(withdraw_win, text="Back", command=withdraw_win.destroy).pack(side="right", padx=20, pady=20)
@@ -521,12 +788,22 @@ class BankApp:
         scrollbar.pack(side="right", fill="y")
         tree.pack(expand=True, fill="both", padx=10, pady=10)
 
-        transactions = self.current_user.get('transactions', [])
+        # Fetch fresh transactions from SQLite when displaying history
+        transactions = get_user_transactions_sqlite(DB_PATH, self.current_user["uname"])
+        # Update current_user's transactions list in memory as well, if desired, or always fetch fresh.
+        # For simplicity here, we'll rely on fetching fresh each time history is shown.
+        # self.current_user['transactions'] = transactions 
+
         if not transactions:
             Label(history_win, text="No transactions yet.", font=("Arial", 15), bg="white").pack(pady=20)
         else:
+            # Clear existing tree items before adding new ones, if any (e.g. if page is refreshed)
+            for i in tree.get_children():
+                tree.delete(i)
             for tx in transactions:
-                tree.insert("", "end", values=(tx['timestamp'], tx['type'].title(), tx['amount']))
+                # Ensure tx is a dict if get_user_transactions_sqlite returns Row objects or similar
+                tree.insert("", "end", values=(tx['timestamp'], str(tx['type']).title(), tx['amount']))
+
 
         def confirm_logout_from_history():
             if messagebox.askyesno("Confirm Logout", "Are you sure you want to logout?"):
@@ -548,5 +825,41 @@ if __name__ == "__main__":
     # If issues arise, this is an alternative spot:
     # style = ttk.Style(root)
     # style.theme_use('clam') # or another theme
+
+    db_initialized_during_migration = False
+    if os.path.exists("appData.bin") and (not os.path.exists(DB_PATH) or os.path.getsize(DB_PATH) == 0):
+        user_choice = messagebox.askyesno(
+            "Confirm Data Migration",
+            "Old data file (appData.bin) found. Would you like to migrate this data to the new database format?\n"
+            "If 'No', the old data will not be accessible by this version of the application."
+        )
+        if user_choice:
+            initialize_database(DB_PATH) # Ensure DB and tables are ready for migration
+            db_initialized_during_migration = True
+            logging.info("User chose to migrate data.")
+            migrated_users, migrated_transactions = migrate_pickle_to_sqlite(DB_PATH, "appData.bin")
+            messagebox.showinfo(
+                "Migration Complete",
+                f"{migrated_users} users and {migrated_transactions} transactions were migrated."
+            )
+            
+            rename_choice = messagebox.askyesno(
+                "Rename Old Data File?",
+                "Migration successful. Would you like to rename 'appData.bin' to 'appData.bin.migrated' "
+                "to prevent this prompt in the future?"
+            )
+            if rename_choice:
+                try:
+                    os.rename("appData.bin", "appData.bin.migrated")
+                    logging.info("'appData.bin' renamed to 'appData.bin.migrated'.")
+                except OSError as e:
+                    logging.error("Failed to rename 'appData.bin': %s", e)
+                    messagebox.showwarning("Rename Failed", f"Could not rename 'appData.bin': {e}")
+        else:
+            logging.info("User chose not to migrate data from 'appData.bin'.")
+
+    if not db_initialized_during_migration:
+        initialize_database(DB_PATH) # Initialize the database if not done during migration
+    
     app = BankApp(root)
     root.mainloop()
