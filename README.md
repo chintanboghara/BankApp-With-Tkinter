@@ -28,6 +28,9 @@ This is a simple bank application built using Python's Tkinter library for the g
 - **Improved User Experience:**  
   The application now utilizes Tkinter's themed widgets (`ttk`) for a more modern visual appearance and improved consistency. Critical actions like registration and logout now feature confirmation dialogs to prevent accidental operations and enhance usability.
 
+- **Login Rate Limiting:**  
+  To protect against brute-force attacks, user accounts are temporarily locked (default: 2 minutes) after a set number of consecutive failed login attempts (default: 5 attempts). This is tracked per username.
+
 ## Installation
 
 1. **Python 3.x:**  
