@@ -4,7 +4,7 @@ import re
 import logging
 import hashlib
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta # Ensure timedelta is imported
 from pathlib import Path # Added
 from tkinter import *
 from tkinter import ttk, messagebox
@@ -79,8 +79,16 @@ def initialize_database(db_path: Path = DB_PATH) -> None:
                     FOREIGN KEY(user_id) REFERENCES users(id)
                 )
             """)
+            # Create login_attempts table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS login_attempts (
+                    username TEXT PRIMARY KEY,
+                    failure_count INTEGER NOT NULL DEFAULT 0,
+                    lockout_until TEXT 
+                )
+            """)
             conn.commit()
-            logging.info("Database initialized successfully at %s", db_path)
+            logging.info("Database tables (users, transactions, login_attempts) initialized successfully at %s", db_path)
     except sqlite3.Error as e:
         logging.error("Error initializing database at %s: %s", db_path, e)
 
@@ -303,6 +311,11 @@ def check_password_strength(password: str) -> dict:
 
 # --- Password Hashing (New Implementation) ---
 ITERATIONS = 260000 # Recommended by OWASP for PBKDF2-SHA256 as of a few years ago.
+
+# --- Login Attempt Constants ---
+MAX_FAILED_ATTEMPTS = 5
+LOCKOUT_DURATION_MINUTES = 2 # For easier testing, as requested
+
 
 def hash_password_old_sha256(password: str) -> str:
     """
@@ -649,11 +662,46 @@ class BankApp:
         """Process login using provided credentials."""
         username = self.username_var.get().strip()
         password = self.password_var.get().strip()
-        # hashed_input = hash_password(password) # This would generate a new hash each time, not for verification
 
+        # 1. Check for existing lockout
+        attempt_info = get_login_attempt_info(DB_PATH, username)
+        if attempt_info:
+            lockout_until_str = attempt_info.get('lockout_until')
+            if lockout_until_str:
+                try:
+                    lockout_datetime = datetime.strptime(lockout_until_str, '%Y-%m-%d %H:%M:%S')
+                    if datetime.now() < lockout_datetime:
+                        remaining_time = lockout_datetime - datetime.now()
+                        # Calculate remaining minutes and seconds for a more user-friendly message
+                        remaining_minutes = int(remaining_time.total_seconds() // 60)
+                        remaining_seconds = int(remaining_time.total_seconds() % 60)
+                        
+                        time_left_str = ""
+                        if remaining_minutes > 0:
+                            time_left_str += f"{remaining_minutes} minute(s)"
+                        if remaining_seconds > 0:
+                            if time_left_str: time_left_str += " and "
+                            time_left_str += f"{remaining_seconds} second(s)"
+                        if not time_left_str: # Should not happen if datetime.now() < lockout_datetime
+                            time_left_str = "a short while"
+
+                        messagebox.showerror(
+                            "Login Failed",
+                            f"Account for '{username}' is temporarily locked. Please try again in {time_left_str}."
+                        )
+                        logging.warning(f"Login attempt for locked account '{username}'. Lockout active until {lockout_datetime.strftime('%Y-%m-%d %H:%M:%S')}.")
+                        return
+                except ValueError:
+                    logging.error(f"Could not parse lockout_until string '{lockout_until_str}' for user '{username}'. Allowing login attempt.")
+
+
+        # Proceed with login attempt
         user_data = get_user_data_sqlite(DB_PATH, username)
-        # Use verify_password for login
+        
         if user_data and verify_password(password, user_data["password_hash"]):
+            # 3. Successful login: Reset login attempts
+            reset_login_attempts(DB_PATH, username)
+
             stored_hash = user_data["password_hash"]
             # Check for old hash format and upgrade if necessary
             if '$' not in stored_hash and len(stored_hash) == 64: # Heuristic for old SHA256 hash
@@ -686,8 +734,41 @@ class BankApp:
             logging.info("User '%s' logged in successfully.", username)
             self.show_dashboard()
         else:
+            # 2. Failed login attempt: Record it
+            # We record the failure regardless of whether the user exists or not,
+            # as per instructions, tied to the entered username.
+            record_failed_login_attempt(DB_PATH, username)
+            
+            # Check if this attempt caused a lockout to provide a more specific message
+            # This is an optional refinement.
+            updated_attempt_info = get_login_attempt_info(DB_PATH, username)
+            if updated_attempt_info and updated_attempt_info.get('lockout_until'):
+                 lockout_datetime_str = updated_attempt_info.get('lockout_until')
+                 try:
+                    lockout_dt = datetime.strptime(lockout_datetime_str, '%Y-%m-%d %H:%M:%S')
+                    if datetime.now() < lockout_dt : # Check if lockout is now active
+                        remaining_time = lockout_dt - datetime.now()
+                        remaining_minutes = int(remaining_time.total_seconds() // 60)
+                        remaining_seconds = int(remaining_time.total_seconds() % 60)
+                        time_left_str = ""
+                        if remaining_minutes > 0: time_left_str += f"{remaining_minutes} minute(s)"
+                        if remaining_seconds > 0: 
+                            if time_left_str: time_left_str += " and "
+                            time_left_str += f"{remaining_seconds} second(s)"
+                        if not time_left_str: time_left_str = "a short while"
+                        
+                        messagebox.showerror(
+                            "Login Failed",
+                            f"Incorrect username or password. Account for '{username}' is now locked due to too many failed attempts. Please try again in {time_left_str}."
+                        )
+                        logging.warning(f"Failed login attempt for username: '{username}'. Account now locked.")
+                        return # Return after showing lockout message
+                 except ValueError:
+                    pass # If parsing fails, fall through to generic message
+
             messagebox.showerror("Login Failed", "Incorrect Username or Password")
             logging.warning("Failed login attempt for username: %s", username)
+
 
     def create_register_screen(self) -> None:
         """Display the registration window."""

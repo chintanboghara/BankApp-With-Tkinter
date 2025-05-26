@@ -9,23 +9,31 @@ import sqlite3
 # Assuming BankAppWithTkinter.py is in the same directory or accessible in PYTHONPATH
 from BankAppWithTkinter import (
     hash_password_old_sha256, 
+    hash_password_old_sha256, 
     hash_password, 
     verify_password, 
     ITERATIONS, 
     is_number,
-    check_password_strength, # Added
+    check_password_strength,
     BankApp,
     DB_PATH, 
     initialize_database,
     create_user_sqlite,
     get_user_data_sqlite,
     update_user_balance_sqlite,
-    update_user_password_hash_sqlite, # Added
+    update_user_password_hash_sqlite,
     record_transaction_sqlite,
     get_user_transactions_sqlite,
     load_user_data_pickle, 
-    migrate_pickle_to_sqlite 
+    migrate_pickle_to_sqlite,
+    # Login attempt functions and constants
+    get_login_attempt_info,
+    record_failed_login_attempt,
+    reset_login_attempts,
+    MAX_FAILED_ATTEMPTS,
+    LOCKOUT_DURATION_MINUTES
 )
+from datetime import datetime, timedelta # Added
 
 # Define a test-specific DB path (in-memory)
 TEST_DB_PATH = ":memory:"
@@ -732,3 +740,129 @@ if __name__ == '__main__':
 # or raise specific exceptions for errors, and the UI method would then call this and update Tkinter elements.
 # Given the current structure, these simulation tests are a compromise.
 # The test_is_number and test_hash_password, test_data_storage_functions are more direct unit tests.
+
+    def test_rate_limiting_logic(self):
+        # Define a test username
+        test_user = "rate_test_user"
+        test_pass = "password"
+        
+        # Create the user for testing login success/failure
+        create_user_sqlite(TEST_DB_PATH, test_user, hash_password(test_pass), "Rate Test", 30, 1, 100)
+
+        # --- Test helper functions directly ---
+        # 1. Initial state: No attempts
+        info = get_login_attempt_info(TEST_DB_PATH, test_user)
+        self.assertIsNone(info, "There should be no login attempt info for a new user.")
+
+        # 2. Record one failed attempt
+        record_failed_login_attempt(TEST_DB_PATH, test_user)
+        info = get_login_attempt_info(TEST_DB_PATH, test_user)
+        self.assertIsNotNone(info)
+        self.assertEqual(info['username'], test_user)
+        self.assertEqual(info['failure_count'], 1)
+        self.assertIsNone(info['lockout_until'], "Should not be locked out after 1 failure.")
+
+        # 3. Reset attempts
+        reset_login_attempts(TEST_DB_PATH, test_user)
+        info = get_login_attempt_info(TEST_DB_PATH, test_user)
+        self.assertIsNone(info, "Login attempt info should be cleared after reset.")
+
+        # 4. Trigger lockout by exceeding MAX_FAILED_ATTEMPTS
+        for i in range(MAX_FAILED_ATTEMPTS):
+            record_failed_login_attempt(TEST_DB_PATH, test_user)
+        
+        info = get_login_attempt_info(TEST_DB_PATH, test_user)
+        self.assertIsNotNone(info)
+        self.assertEqual(info['failure_count'], MAX_FAILED_ATTEMPTS)
+        self.assertIsNotNone(info['lockout_until'], "Should be locked out now.")
+        
+        # Check lockout_until time is roughly correct (within a small delta)
+        lockout_end_dt = datetime.strptime(info['lockout_until'], '%Y-%m-%d %H:%M:%S')
+        expected_end_dt = datetime.now() + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+        self.assertAlmostEqual(lockout_end_dt, expected_end_dt, delta=timedelta(seconds=5),
+                               msg="Lockout time not set as expected.")
+
+        # --- Test do_login integration ---
+        app = self._create_mock_app_instance() # From existing test setup
+
+        # Scenario A: User gets locked out after MAX_FAILED_ATTEMPTS
+        reset_login_attempts(TEST_DB_PATH, test_user) # Clean slate for this user
+        app.username_var.set(test_user)
+        app.password_var.set("wrong_password")
+
+        for i in range(MAX_FAILED_ATTEMPTS):
+            with patch('BankAppWithTkinter.messagebox') as mock_messagebox:
+                app.do_login()
+                if i < MAX_FAILED_ATTEMPTS - 1:
+                    mock_messagebox.showerror.assert_called_with("Login Failed", "Incorrect Username or Password")
+                else:
+                    # On the attempt that triggers lockout, a different message might be shown by the enhanced do_login
+                    # This depends on the exact implementation of the "enhanced message"
+                    # For now, let's assume it shows a lockout message on the attempt *after* lockout is active
+                    # or the specific "now locked" message.
+                    # Checking for any call to showerror is a basic check here.
+                    mock_messagebox.showerror.assert_called()
+        
+        # Verify user is locked in DB
+        info_after_lockout = get_login_attempt_info(TEST_DB_PATH, test_user)
+        self.assertIsNotNone(info_after_lockout)
+        self.assertEqual(info_after_lockout['failure_count'], MAX_FAILED_ATTEMPTS)
+        self.assertIsNotNone(info_after_lockout['lockout_until'])
+
+        # Scenario B: Attempt login while locked out
+        with patch('BankAppWithTkinter.messagebox') as mock_messagebox:
+            app.do_login() # Attempt login again
+            # Expected: Show error about account being locked
+            mock_messagebox.showerror.assert_called_with(
+                "Login Failed", 
+                unittest.mock.ANY # Using ANY because the exact time remaining string is hard to match
+            ) 
+            # Check that the message contains "locked"
+            args, _ = mock_messagebox.showerror.call_args
+            self.assertIn("locked", args[1].lower())
+
+
+        # Scenario C: Login succeeds after lockout period expires
+        # Mock datetime.now() to be in the future, after lockout_until
+        current_lockout_str = get_login_attempt_info(TEST_DB_PATH, test_user)['lockout_until']
+        lockout_end_time_obj = datetime.strptime(current_lockout_str, '%Y-%m-%d %H:%M:%S')
+        
+        future_time = lockout_end_time_obj + timedelta(seconds=1) # 1 second after lockout expires
+        
+        with patch('BankAppWithTkinter.datetime') as mock_datetime_module:
+            mock_datetime_module.now.return_value = future_time
+            mock_datetime_module.strptime = datetime.strptime # Keep strptime working
+            mock_datetime_module.timedelta = timedelta # Keep timedelta working
+
+            # Attempt login with correct password
+            app.password_var.set(test_pass) # Set correct password
+            with patch('BankAppWithTkinter.messagebox') as mock_messagebox_success:
+                app.do_login()
+            
+            mock_messagebox_success.showinfo.assert_called_with("Success", "Login Successful")
+            self.assertIsNotNone(app.current_user)
+            self.assertEqual(app.current_user['uname'], test_user)
+
+            # Verify attempts were reset in DB
+            info_after_successful_login = get_login_attempt_info(TEST_DB_PATH, test_user)
+            self.assertIsNone(info_after_successful_login, "Login attempts should be reset after successful login post-lockout.")
+
+        # Scenario D: Successful login resets attempts if user was not locked but had some failures
+        reset_login_attempts(TEST_DB_PATH, test_user) # Clean slate
+        app.current_user = None # Reset app state
+
+        # Record a few failures, but not enough to lock
+        record_failed_login_attempt(TEST_DB_PATH, test_user)
+        record_failed_login_attempt(TEST_DB_PATH, test_user)
+        info_before_success = get_login_attempt_info(TEST_DB_PATH, test_user)
+        self.assertEqual(info_before_success['failure_count'], 2)
+
+        app.username_var.set(test_user)
+        app.password_var.set(test_pass) # Correct password
+        with patch('BankAppWithTkinter.messagebox') as mock_messagebox_final:
+            app.do_login()
+        
+        mock_messagebox_final.showinfo.assert_called_with("Success", "Login Successful")
+        self.assertIsNotNone(app.current_user)
+        info_after_final_success = get_login_attempt_info(TEST_DB_PATH, test_user)
+        self.assertIsNone(info_after_final_success, "Login attempts should be reset by a successful login.")
