@@ -316,6 +316,10 @@ ITERATIONS = 260000 # Recommended by OWASP for PBKDF2-SHA256 as of a few years a
 MAX_FAILED_ATTEMPTS = 5
 LOCKOUT_DURATION_MINUTES = 2 # For easier testing, as requested
 
+# --- Session Timeout Constants ---
+SESSION_TIMEOUT_MINUTES = 1 # Use 1 minute for easier testing for now
+SESSION_CHECK_INTERVAL_SECONDS = 30 # Check every 30 seconds
+
 
 def hash_password_old_sha256(password: str) -> str:
     """
@@ -571,6 +575,11 @@ class BankApp:
         # Variables for login screen.
         self.username_var = StringVar()
         self.password_var = StringVar()
+
+        # Session management attributes
+        self.last_activity_time = None
+        self.session_check_timer_id = None
+        self.open_windows = {} # To store references like {'dashboard': dashboard_window}
         
         # Apply a ttk theme
         style = ttk.Style()
@@ -732,6 +741,7 @@ class BankApp:
             }
             messagebox.showinfo("Success", "Login Successful")
             logging.info("User '%s' logged in successfully.", username)
+            self.start_session_timer() # Start session timer on successful login
             self.show_dashboard()
         else:
             # 2. Failed login attempt: Record it
@@ -774,6 +784,7 @@ class BankApp:
         """Display the registration window."""
         self.master.withdraw()
         register_window = Toplevel(self.master)
+        self.open_windows['register'] = register_window # Add to tracking
         register_window.title("Sign Up")
         register_window.geometry("500x550")
         register_window.configure(bg="white")
@@ -789,6 +800,7 @@ class BankApp:
         }
 
         def back_to_login() -> None:
+            self.open_windows.pop('register', None) # Remove from tracking
             register_window.destroy()
             self.master.deiconify()
 
@@ -894,6 +906,13 @@ class BankApp:
     def show_dashboard(self) -> None:
         """Display the dashboard with options for deposit, withdrawal, and personal information."""
         dashboard = Toplevel(self.master)
+        # Close any lingering dashboard if one somehow exists (defensive)
+        if 'dashboard' in self.open_windows and self.open_windows['dashboard'].winfo_exists():
+            self.open_windows['dashboard'].destroy()
+        self.open_windows['dashboard'] = dashboard
+        self.update_last_activity_time() # Activity: dashboard shown
+        # self.start_session_timer() was already called in do_login
+
         dashboard.title("Dashboard")
         dashboard.geometry("500x350")
         dashboard.configure(bg="white")
@@ -905,6 +924,8 @@ class BankApp:
 
         def logout() -> None:
             if messagebox.askyesno("Confirm Logout", "Are you sure you want to logout?"):
+                self.cancel_session_timer()
+                self.open_windows.pop('dashboard', None) # Explicitly remove before destroy
                 self.current_user = None
                 dashboard.destroy()
                 self.create_login_screen()
@@ -938,6 +959,7 @@ class BankApp:
 
     def show_deposit(self, parent: Toplevel, balance_label: Label) -> None:
         """Display the deposit window."""
+        self.start_session_timer() # User performed an action, reset timeout timer
         deposit_win = Toplevel(parent)
         deposit_win.title("Deposit")
         deposit_win.geometry("500x350")
@@ -981,6 +1003,7 @@ class BankApp:
                 # Update in-memory transaction list for the current session
                 self.current_user['transactions'].append(transaction)
                 logging.info("Deposit transaction processed and recorded for %s.", self.current_user["uname"])
+                self.start_session_timer() # User performed an action, reset timeout timer
             else:
                 messagebox.showerror("Deposit Failed", "Could not record the transaction in the database.")
                 logging.error("Failed to record deposit transaction for %s in SQLite.", self.current_user["uname"])
@@ -1000,6 +1023,7 @@ class BankApp:
 
     def show_withdraw(self, parent: Toplevel, balance_label: Label) -> None:
         """Display the withdrawal window."""
+        self.start_session_timer() # User performed an action, reset timeout timer
         withdraw_win = Toplevel(parent)
         withdraw_win.title("Withdraw")
         withdraw_win.geometry("500x350")
@@ -1047,6 +1071,7 @@ class BankApp:
                 # Update in-memory transaction list for the current session
                 self.current_user['transactions'].append(transaction)
                 logging.info("Withdrawal transaction processed and recorded for %s.", self.current_user["uname"])
+                self.start_session_timer() # User performed an action, reset timeout timer
             else:
                 messagebox.showerror("Withdrawal Failed", "Could not record the transaction in the database.")
                 logging.error("Failed to record withdrawal transaction for %s in SQLite.", self.current_user["uname"])
@@ -1065,6 +1090,7 @@ class BankApp:
 
     def show_personal_info(self, parent: Toplevel) -> None:
         """Display a window showing the personal information of the current user."""
+        self.start_session_timer() # User performed an action, reset timeout timer
         info_win = Toplevel(parent)
         info_win.title("Personal Information")
         info_win.geometry("500x350")
@@ -1094,6 +1120,7 @@ class BankApp:
 
     def show_transaction_history(self, parent: Toplevel, balance_label: Label) -> None:
         """Display the transaction history window."""
+        self.start_session_timer() # User performed an action, reset timeout timer
         history_win = Toplevel(parent)
         history_win.title("Transaction History")
         history_win.geometry("600x400")
@@ -1140,6 +1167,82 @@ class BankApp:
 
         ttk.Button(history_win, text="Back", command=history_win.destroy).pack(side="right", padx=20, pady=20)
         ttk.Button(history_win, text="Logout", command=confirm_logout_from_history).pack(side="left", padx=20, pady=20)
+
+    # --- Session Management Methods ---
+    def update_last_activity_time(self):
+        self.last_activity_time = datetime.now()
+        logging.info("User activity recorded at %s", self.last_activity_time.strftime('%Y-%m-%d %H:%M:%S'))
+
+    def _close_all_app_windows(self):
+        logging.info("Closing all open application windows due to session timeout or logout.")
+        # Iterate over a copy of items because destroying widgets might modify the dict
+        for window_key, window_instance in list(self.open_windows.items()):
+            try:
+                if window_instance and window_instance.winfo_exists(): # Check if window still exists
+                    window_instance.destroy()
+                self.open_windows.pop(window_key, None) # Remove from tracking
+            except Exception as e:
+                logging.error(f"Error destroying window {window_key}: {e}")
+        # Ensure master window (login screen) is visible if all else closed
+        # This might be handled by create_login_screen itself if it deiconifies.
+        # For now, this method focuses on child windows.
+        
+    def check_session_timeout(self):
+        if not self.current_user: # No user logged in, or already logged out
+            self.cancel_session_timer() # Ensure timer is cancelled
+            return
+
+        if self.last_activity_time:
+            elapsed_seconds = (datetime.now() - self.last_activity_time).total_seconds()
+            timeout_seconds = SESSION_TIMEOUT_MINUTES * 60
+
+            if elapsed_seconds > timeout_seconds:
+                logging.info(f"User '{self.current_user['uname']}' session timed out due to inactivity.")
+                # Store uname before clearing current_user for the message
+                timed_out_username = self.current_user['uname'] 
+                
+                self._close_all_app_windows() # Close dashboard, deposit, etc.
+                self.current_user = None # Clear current user session
+
+                # Show login screen (master window should be withdrawn by other screens)
+                # self.master.deiconify() # Ensure main window is visible for login screen
+                self.create_login_screen() # Re-create login screen
+                
+                messagebox.showinfo(
+                    "Session Timeout",
+                    f"User '{timed_out_username}' has been logged out due to inactivity."
+                )
+                self.cancel_session_timer() # Stop further checks
+                return # Important to return after timeout actions
+
+        # If not timed out, reschedule the check
+        # Ensure timer_id is managed to avoid multiple conflicting timers if start_session_timer is called again.
+        if self.session_check_timer_id: # If a timer was already set, clear it before setting a new one
+             self.master.after_cancel(self.session_check_timer_id)
+
+        self.session_check_timer_id = self.master.after(
+            SESSION_CHECK_INTERVAL_SECONDS * 1000, 
+            self.check_session_timeout
+        )
+
+    def start_session_timer(self):
+        self.update_last_activity_time() # Record current time as last activity
+        if self.session_check_timer_id:
+            self.master.after_cancel(self.session_check_timer_id)
+        
+        logging.info("Session timer started. Timeout in %d min. Check interval: %d sec.", 
+                     SESSION_TIMEOUT_MINUTES, SESSION_CHECK_INTERVAL_SECONDS)
+        self.session_check_timer_id = self.master.after(
+            SESSION_CHECK_INTERVAL_SECONDS * 1000, 
+            self.check_session_timeout
+        )
+
+    def cancel_session_timer(self):
+        if self.session_check_timer_id:
+            self.master.after_cancel(self.session_check_timer_id)
+            self.session_check_timer_id = None
+            logging.info("Session timer cancelled.")
+    # --- End Session Management Methods ---
 
 
 if __name__ == "__main__":
