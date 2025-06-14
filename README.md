@@ -1,6 +1,6 @@
 # BankApp with Tkinter
 
-This is a simple bank application built using Python's Tkinter library for the graphical user interface. The application enables users to register, log in, and perform basic banking operations such as depositing and withdrawing money. This improved version features an object-oriented design for enhanced structure, maintainability, and robust error handling.
+This is a simple bank application built using Python's Tkinter library for the graphical user interface. The application enables users to register, log in, and perform basic banking operations such as depositing and withdrawing money. This improved version features a modular, object-oriented design for enhanced structure, maintainability, and robust error handling.
 
 ## Features
 
@@ -45,11 +45,11 @@ This is a simple bank application built using Python's Tkinter library for the g
    cd BankApp-With-Tkinter
    python BankAppWithTkinter.py
    ```
-   Alternatively, run directly:
+   Alternatively, run directly from the project directory:
    ```sh
    python BankAppWithTkinter.py
    ```
-   or
+   or (on Windows)
    ```sh
    py BankAppWithTkinter.py
    ```
@@ -80,29 +80,58 @@ This is a simple bank application built using Python's Tkinter library for the g
 
 ## Code Structure
 
-- **Main Window (`master`):**  
-  The initial login window for user authentication or registration navigation.
+The application is now organized into several key Python modules for better separation of concerns:
 
-- **Registration Screen (`rScreen`):**  
-  A dedicated window for account creation with input validation and error handling.
+- **`BankAppWithTkinter.py` (`BankApp` class):**
+  This remains the main entry point and acts as the central orchestrator. The `BankApp` class initializes the application, manages the overall session state (like `current_user`), and coordinates interactions between the UI and the backend services. It handles UI event callbacks triggered by user actions.
 
-- **Dashboard (`hScreen`):**  
-  The central interface after login, offering access to banking operations.
+- **`ui_manager.py` (`UIManager` class):**
+  Responsible for all aspects of UI creation and presentation. It builds and manages all Tkinter windows, dialogs, widgets, and styles. It receives data from `BankApp` for display and forwards user interactions (e.g., button clicks) to `BankApp` via callbacks.
 
-- **Deposit & Withdraw Pages (`dScreen` & `wScreen`):**  
-  Separate windows managing deposit and withdrawal with real-time balance updates.
+- **`auth_service.py` (`AuthService` class):**
+  Handles all user authentication logic. This includes password hashing (using PBKDF2-SHA256), password verification, and managing login attempt tracking (rate limiting and account lockout).
 
-- **Personal Info Page (`pScreen`):**  
-  A window showing the logged-in user's information.
+- **`account_service.py` (`AccountService` class):**
+  Manages all data persistence related to user accounts and transactions. It interacts directly with the SQLite database for operations like creating users, fetching user data, updating balances, storing password hashes, and recording financial transactions. It also contains logic for migrating data from older formats.
 
-- **Transaction History Display:**  
-  A window accessible from the dashboard (via the `show_transaction_history` method in `BankApp`) that displays a table of the user's past transactions (deposits and withdrawals) with timestamps, types, and amounts.
+- **`constants.py`:**
+  A centralized module defining various constants used throughout the application, such as UI text, window titles, color schemes, font definitions, database table/column names, and application settings. This improves maintainability and consistency.
 
-- **Object-Oriented Design:**  
-  Encapsulated within a `BankApp` class, organizing UI, event handling, and data management for maintainability.
+- **`test_bank_app.py`:**
+  A suite of unit tests using Python's `unittest` module to verify the core logic of the application, including data manipulation, user authentication, transaction processing, and utility functions.
 
-- **Unit Tests (`test_bank_app.py`):**  
-  A suite of unit tests using Python's `unittest` module to verify the core logic of the application, including data manipulation, user authentication, transaction processing, and utility functions. These tests help ensure code reliability and facilitate safer modifications.
+**Interaction Flow (Example - Login):**
+1. User enters credentials in the UI (`UIManager`).
+2. `UIManager` passes these to `BankApp` via a callback.
+3. `BankApp` calls `AuthService` to check login attempt limits and then verify the password.
+4. `AuthService` may interact with `AccountService` (or directly with the DB for login attempts) to get stored hash and attempt info.
+5. If verification is successful, `AuthService` informs `BankApp`.
+6. `BankApp` then uses `AccountService` to fetch full user details.
+7. `BankApp` updates its session state (`current_user`) and instructs `UIManager` to display the dashboard.
+
+## Screenshots
+
+Below are some illustrative screenshots of the application:
+
+**Login Page:**
+[Screenshot of Login Screen]
+<!-- TODO: Add screenshot of login_screen.png -->
+*The main login interface where users can enter their credentials or navigate to the registration page.*
+
+**Registration Page:**
+[Screenshot of Registration Screen]
+<!-- TODO: Add screenshot of registration_screen.png -->
+*The account creation screen with fields for user details and real-time password strength feedback.*
+
+**Dashboard:**
+[Screenshot of Dashboard]
+<!-- TODO: Add screenshot of dashboard_screen.png -->
+*The main dashboard displayed after successful login, showing user balance and available actions.*
+
+**Transaction History:**
+[Screenshot of Transaction History]
+<!-- TODO: Add screenshot of transaction_history_screen.png -->
+*The transaction history view, listing deposits and withdrawals with details.*
 
 ## Data Storage and Logging
 
@@ -114,33 +143,33 @@ Previously, data was stored in `appData.bin` using Python's `pickle` module; the
 
 Each user's data in the database includes:
 - `username`: The user's chosen login name.
-- `password_hash`: Securely hashed password. The application uses PBKDF2-SHA256 with a unique salt per user and a high iteration count (currently 260,000). The stored format is `pbkdf2_sha256$<iterations>$<salt_hex>$<key_hex>`. For users with accounts created with the older hashing method (plain SHA-256, typically found in migrated `appData.bin` files), their password hash will be automatically and seamlessly upgraded to the new PBKDF2-SHA256 format upon their next successful login. This significantly improves the security of stored passwords.
+- `password_hash`: Securely hashed password. The application uses PBKDF2-SHA256 with a unique salt per user and a high iteration count (currently defined in `constants.py`, e.g., 260,000). The stored format is `pbkdf2_sha256$<iterations>$<salt_hex>$<key_hex>`. For users with accounts created with the older hashing method (plain SHA-256, typically found in migrated `appData.bin` files), their password hash will be automatically and seamlessly upgraded to the new PBKDF2-SHA256 format upon their next successful login.
 - `full_name`: The user's full name.
 - `age`: The user's age.
 - `gender`: The user's gender (stored as an integer).
 - `balance`: The user's current account balance.
-- `transactions`: Stored in a separate `transactions` table linked to the user, where each transaction record contains `type` ('deposit' or 'withdrawal'), `amount`, and `timestamp`.
+- Transactions are stored in a separate `transactions` table linked to the user, where each record contains `type` ('deposit' or 'withdrawal'), `amount`, and `timestamp`.
 
 ### Log File
 The application log (`bankapp.log`) is created in the same directory from which the application is run. 
 - When running from source, this is typically the project's root directory.
 - When using the packaged executable, this is the directory containing the executable file. 
-The log file implements rotation: it rotates when it reaches approximately 1MB, and up to 3 backup log files are kept.
+The log file implements rotation: it rotates when it reaches approximately 1MB, and up to 3 backup log files are kept. The log formatter includes timestamp, log level, module name, function name, and the log message for detailed debugging.
 
 ## Error Handling
 
 - **Input Validation:**  
-  Ensures numeric inputs (balance, age) are valid and full names are alphabetic only.
+  Ensures numeric inputs (balance, age) are valid and full names are alphabetic only (with spaces). Feedback provided via dialogs.
 
 - **User Feedback:**  
-  Message boxes provide alerts for errors like invalid inputs, insufficient funds, or duplicate usernames.
+  Message boxes (managed by `UIManager`) provide alerts for errors like invalid inputs, insufficient funds, or duplicate usernames, and confirmations for important actions.
 
-- **Robust File I/O:**  
-  Helper functions manage file operations, gracefully handling missing or corrupted data.
+- **Exception Handling:**
+  Core operations in `BankApp` and service classes include `try-except` blocks to catch and log errors (database issues, unexpected exceptions), aiming to prevent crashes and provide informative error messages to the user or logs.
 
 ## Running Tests
 
-Unit tests are provided to verify the application's core logic. These tests ensure that data handling, user operations (registration, login, deposit, withdrawal), and utility functions work as expected.
+Unit tests are provided to verify the application's core logic. These tests ensure that data handling, user operations (registration, login, deposit, withdrawal), utility functions, and security features like password hashing and login attempt tracking work as expected.
 
 To run the tests, navigate to the project's root directory in your terminal and execute:
 
